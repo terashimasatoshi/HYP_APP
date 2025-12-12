@@ -38,7 +38,7 @@ export function HomeScreen({
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [previousVisit, setPreviousVisit] = useState<PreviousVisit | null>(null);
   const [loading, setLoading] = useState(false);
-  
+
   // 新規登録用
   const [newCustomer, setNewCustomer] = useState({
     name: '',
@@ -46,6 +46,9 @@ export function HomeScreen({
     gender: '',
     phone: '',
   });
+
+  // ✅ 追加：登録中フラグ（二重登録防止）
+  const [isRegisteringCustomer, setIsRegisteringCustomer] = useState(false);
 
   // App側から「新規顧客登録でホームを開く」などの指示があった場合
   useEffect(() => {
@@ -58,6 +61,7 @@ export function HomeScreen({
     setPreviousVisit(null);
     setLoading(false);
     setNewCustomer({ name: '', age: '', gender: '', phone: '' });
+    setIsRegisteringCustomer(false);
   }, [resetCounter]);
 
   // 戻るボタンなどでホームに戻った場合、App側のcustomerDataに合わせて選択状態を復元
@@ -117,18 +121,32 @@ export function HomeScreen({
   const handleCustomerSelect = (customer: Customer | null) => {
     setSelectedCustomer(customer);
     if (customer) {
-      updateCustomerData({ 
+      updateCustomerData({
         name: customer.full_name,
-        customerId: customer.id 
+        customerId: customer.id,
       });
     }
   };
 
+  // ✅ 登録処理（確認ダイアログ＋二重送信防止）
   const handleNewCustomerSubmit = async () => {
-    if (!newCustomer.name) {
+    if (isRegisteringCustomer) return;
+
+    if (!newCustomer.name.trim()) {
       alert('お名前を入力してください');
       return;
     }
+
+    const ok = confirm(
+      `この内容で顧客を登録しますか？\n\n` +
+        `名前: ${newCustomer.name}\n` +
+        `年齢: ${newCustomer.age || '-'}\n` +
+        `性別: ${newCustomer.gender || '-'}\n` +
+        `電話番号: ${newCustomer.phone || '-'}`
+    );
+    if (!ok) return;
+
+    setIsRegisteringCustomer(true);
 
     const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
     try {
@@ -139,11 +157,18 @@ export function HomeScreen({
           full_name: newCustomer.name,
           phone: newCustomer.phone || null,
           gender: newCustomer.gender || null,
-          birthdate: newCustomer.age ? 
-            new Date(new Date().getFullYear() - parseInt(newCustomer.age), 0, 1).toISOString().split('T')[0] 
+          birthdate: newCustomer.age
+            ? new Date(new Date().getFullYear() - parseInt(newCustomer.age), 0, 1)
+                .toISOString()
+                .split('T')[0]
             : null,
         }),
       });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(text || `HTTP ${response.status}`);
+      }
 
       const data = await response.json();
       const customer: Customer = {
@@ -152,19 +177,21 @@ export function HomeScreen({
         phone: newCustomer.phone,
         gender: newCustomer.gender,
       };
-      
+
       setSelectedCustomer(customer);
-      updateCustomerData({ 
+      updateCustomerData({
         name: customer.full_name,
-        customerId: customer.id 
+        customerId: customer.id,
       });
-      
-      // フォームをリセット
+
+      // フォームをリセットして検索モードへ（登録後の事故を減らす）
       setNewCustomer({ name: '', age: '', gender: '', phone: '' });
       setMode('search');
     } catch (error) {
       console.error('Failed to create customer:', error);
       alert('顧客登録に失敗しました');
+    } finally {
+      setIsRegisteringCustomer(false);
     }
   };
 
@@ -174,7 +201,10 @@ export function HomeScreen({
     <div className="h-full p-8">
       <div className="max-w-7xl mx-auto h-full flex gap-6">
         {/* Left: Input Area (2/3) */}
-        <div className="flex-[2] bg-white rounded-2xl shadow-lg p-8 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 100px)' }}>
+        <div
+          className="flex-[2] bg-white rounded-2xl shadow-lg p-8 overflow-y-auto"
+          style={{ maxHeight: 'calc(100vh - 100px)' }}
+        >
           <h2 className="text-green-800 mb-6 flex items-center gap-2">
             <Activity className="w-6 h-6" />
             お客様情報
@@ -209,19 +239,12 @@ export function HomeScreen({
           {/* Customer Search */}
           {mode === 'search' && (
             <div className="mb-6">
-              <CustomerPicker 
-                value={selectedCustomer} 
-                onChange={handleCustomerSelect}
-              />
+              <CustomerPicker value={selectedCustomer} onChange={handleCustomerSelect} />
               {selectedCustomer && (
                 <div className="mt-4 p-4 bg-green-50 rounded-lg">
-                  <p className="text-sm text-green-800">
-                    ✓ {selectedCustomer.full_name} 様を選択中
-                  </p>
+                  <p className="text-sm text-green-800">✓ {selectedCustomer.full_name} 様を選択中</p>
                   {selectedCustomer.phone && (
-                    <p className="text-xs text-gray-600 mt-1">
-                      TEL: {selectedCustomer.phone}
-                    </p>
+                    <p className="text-xs text-gray-600 mt-1">TEL: {selectedCustomer.phone}</p>
                   )}
                 </div>
               )}
@@ -241,6 +264,7 @@ export function HomeScreen({
                   className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-300"
                 />
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm text-gray-700 mb-2">年齢</label>
@@ -266,6 +290,7 @@ export function HomeScreen({
                   </select>
                 </div>
               </div>
+
               <div>
                 <label className="block text-sm text-gray-700 mb-2">電話番号（顧客番号）</label>
                 <input
@@ -276,12 +301,22 @@ export function HomeScreen({
                   className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-300"
                 />
               </div>
+
+              {/* ✅ ここが要望の「電話番号の下に顧客登録ボタン」 */}
               <button
                 onClick={handleNewCustomerSubmit}
-                className="w-full py-3 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all"
+                disabled={isRegisteringCustomer || !newCustomer.name.trim()}
+                className={`w-full py-3 rounded-xl transition-all ${
+                  isRegisteringCustomer || !newCustomer.name.trim()
+                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                    : 'bg-green-500 text-white hover:bg-green-600'
+                }`}
               >
-                登録して選択
+                {isRegisteringCustomer ? '登録中...' : '顧客を登録'}
               </button>
+              <p className="text-xs text-gray-500">
+                ※入力ミス防止のため、登録時に確認ダイアログが表示されます
+              </p>
             </div>
           )}
 
@@ -319,9 +354,11 @@ export function HomeScreen({
                       : 'border-gray-200 bg-white hover:border-green-200 hover:bg-green-50/50'
                   }`}
                 >
-                  <div className={`text-sm ${
-                    customerData.menu === menu ? 'text-green-800' : 'text-gray-700'
-                  }`}>
+                  <div
+                    className={`text-sm ${
+                      customerData.menu === menu ? 'text-green-800' : 'text-gray-700'
+                    }`}
+                  >
                     {menu}
                   </div>
                 </button>
@@ -338,13 +375,9 @@ export function HomeScreen({
             {loading ? (
               <div className="text-center py-8 text-gray-400">読み込み中...</div>
             ) : !selectedCustomer ? (
-              <div className="text-center py-8 text-gray-400">
-                お客様を選択してください
-              </div>
+              <div className="text-center py-8 text-gray-400">お客様を選択してください</div>
             ) : !previousVisit ? (
-              <div className="text-center py-8 text-gray-400">
-                初回のご来店です
-              </div>
+              <div className="text-center py-8 text-gray-400">初回のご来店です</div>
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -373,7 +406,9 @@ export function HomeScreen({
           <div className="bg-gradient-to-br from-green-400 to-emerald-500 rounded-2xl shadow-lg p-8 flex-1 flex flex-col items-center justify-center">
             <TrendingUp className="w-16 h-16 text-white mb-4" />
             <p className="text-white/90 text-sm mb-6 text-center">
-              お客様情報を入力して<br />計測を開始してください
+              お客様情報を入力して
+              <br />
+              計測を開始してください
             </p>
             <button
               onClick={onStart}
