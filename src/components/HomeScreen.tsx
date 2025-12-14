@@ -47,7 +47,7 @@ export function HomeScreen({
     phone: '',
   });
 
-  // ✅ 追加：登録中フラグ（二重登録防止）
+  // ✅ 登録中フラグ（二重登録防止）
   const [isRegisteringCustomer, setIsRegisteringCustomer] = useState(false);
 
   // App側から「新規顧客登録でホームを開く」などの指示があった場合
@@ -213,6 +213,7 @@ export function HomeScreen({
           {/* Mode Toggle */}
           <div className="mb-6 flex gap-2">
             <button
+              type="button"
               onClick={() => setMode('search')}
               className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-all ${
                 mode === 'search'
@@ -224,6 +225,7 @@ export function HomeScreen({
               既存顧客検索
             </button>
             <button
+              type="button"
               onClick={() => setMode('new')}
               className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-all ${
                 mode === 'new'
@@ -303,17 +305,20 @@ export function HomeScreen({
               </div>
 
               {/* ✅ ここが要望の「電話番号の下に顧客登録ボタン」 */}
+              {/* 有効になっても “消えない” 配色（白背景＋緑文字＋緑枠）に変更 */}
               <button
+                type="button"
                 onClick={handleNewCustomerSubmit}
                 disabled={isRegisteringCustomer || !newCustomer.name.trim()}
-                className={`w-full py-3 rounded-xl transition-all ${
+                className={`w-full py-3 rounded-xl transition-all border-2 shadow-sm ${
                   isRegisteringCustomer || !newCustomer.name.trim()
-                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                    : 'bg-green-500 text-white hover:bg-green-600'
+                    ? 'bg-gray-200 text-gray-500 border-gray-200 cursor-not-allowed'
+                    : 'bg-white text-green-700 border-green-500 hover:bg-green-50'
                 }`}
               >
                 {isRegisteringCustomer ? '登録中...' : '顧客を登録'}
               </button>
+
               <p className="text-xs text-gray-500">
                 ※入力ミス防止のため、登録時に確認ダイアログが表示されます
               </p>
@@ -326,6 +331,7 @@ export function HomeScreen({
             <div className="flex gap-3">
               {visitCounts.map((vc) => (
                 <button
+                  type="button"
                   key={vc.value}
                   onClick={() => updateCustomerData({ visitCount: vc.value })}
                   className={`px-6 py-2 rounded-full transition-all ${
@@ -346,6 +352,7 @@ export function HomeScreen({
             <div className="grid grid-cols-3 gap-3">
               {menus.map((menu) => (
                 <button
+                  type="button"
                   key={menu}
                   onClick={() => updateCustomerData({ menu })}
                   className={`p-4 rounded-xl border-2 transition-all text-left ${
@@ -411,6 +418,7 @@ export function HomeScreen({
               計測を開始してください
             </p>
             <button
+              type="button"
               onClick={onStart}
               disabled={!canStart}
               className={`w-full py-4 rounded-xl transition-all ${
