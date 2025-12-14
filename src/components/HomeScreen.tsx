@@ -25,6 +25,8 @@ type Customer = {
 type PreviousVisit = {
   date: string;
   after?: { rmssd?: number; sdnn?: number };
+  // ✅ 追加：前回の診断内容（保存済みの場合）
+  ai_report?: string | null;
 };
 
 export function HomeScreen({
@@ -47,7 +49,7 @@ export function HomeScreen({
     phone: '',
   });
 
-  // ✅ 登録中フラグ（二重登録防止）
+  // ✅ 追加：登録中フラグ（二重登録防止）
   const [isRegisteringCustomer, setIsRegisteringCustomer] = useState(false);
 
   // App側から「新規顧客登録でホームを開く」などの指示があった場合
@@ -99,7 +101,7 @@ export function HomeScreen({
     { value: 'third-plus' as const, label: '3回以上' },
   ];
 
-  // 顧客選択時に前回データを取得
+  // 顧客選択時に前回データを取得（ai_report も返す想定）
   useEffect(() => {
     if (selectedCustomer) {
       setLoading(true);
@@ -128,7 +130,7 @@ export function HomeScreen({
     }
   };
 
-  // ✅ 登録処理（確認ダイアログ＋二重送信防止）
+  // 登録処理（確認ダイアログ＋二重送信防止）
   const handleNewCustomerSubmit = async () => {
     if (isRegisteringCustomer) return;
 
@@ -184,7 +186,7 @@ export function HomeScreen({
         customerId: customer.id,
       });
 
-      // フォームをリセットして検索モードへ（登録後の事故を減らす）
+      // フォームをリセットして検索モードへ
       setNewCustomer({ name: '', age: '', gender: '', phone: '' });
       setMode('search');
     } catch (error) {
@@ -304,8 +306,7 @@ export function HomeScreen({
                 />
               </div>
 
-              {/* ✅ ここが要望の「電話番号の下に顧客登録ボタン」 */}
-              {/* 有効になっても “消えない” 配色（白背景＋緑文字＋緑枠）に変更 */}
+              {/* 顧客登録ボタン */}
               <button
                 type="button"
                 onClick={handleNewCustomerSubmit}
@@ -379,6 +380,7 @@ export function HomeScreen({
           {/* Previous Score Card */}
           <div className="bg-white rounded-2xl shadow-lg p-6">
             <h3 className="text-sm text-gray-600 mb-4">前回のスコア</h3>
+
             {loading ? (
               <div className="text-center py-8 text-gray-400">読み込み中...</div>
             ) : !selectedCustomer ? (
@@ -386,26 +388,46 @@ export function HomeScreen({
             ) : !previousVisit ? (
               <div className="text-center py-8 text-gray-400">初回のご来店です</div>
             ) : (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">RMSSD (After)</span>
-                  <span className="text-green-600 font-semibold">
-                    {previousVisit.after?.rmssd || '-'} ms
-                  </span>
+              <>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">RMSSD (After)</span>
+                    <span className="text-green-600 font-semibold">
+                      {previousVisit.after?.rmssd || '-'} ms
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">SDNN (After)</span>
+                    <span className="text-green-600 font-semibold">
+                      {previousVisit.after?.sdnn || '-'} ms
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">前回来店</span>
+                    <span className="text-sm text-gray-500">
+                      {new Date(previousVisit.date).toLocaleDateString('ja-JP')}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">SDNN (After)</span>
-                  <span className="text-green-600 font-semibold">
-                    {previousVisit.after?.sdnn || '-'} ms
-                  </span>
+
+                {/* ✅ 追加：前回の診断内容 */}
+                <div className="mt-4">
+                  {previousVisit.ai_report ? (
+                    <details className="bg-gray-50 rounded-xl p-4">
+                      <summary className="cursor-pointer text-sm text-gray-700">
+                        前回の診断内容を見る
+                      </summary>
+                      <div className="mt-3 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+                        {previousVisit.ai_report}
+                      </div>
+                    </details>
+                  ) : (
+                    <p className="text-xs text-gray-400">
+                      前回の診断内容は保存されていません（診断結果ページで「診断内容を保存する」を押すと表示できます）
+                    </p>
+                  )}
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">前回来店</span>
-                  <span className="text-sm text-gray-500">
-                    {new Date(previousVisit.date).toLocaleDateString('ja-JP')}
-                  </span>
-                </div>
-              </div>
+              </>
             )}
           </div>
 
