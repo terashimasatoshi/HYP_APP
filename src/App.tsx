@@ -175,7 +175,6 @@ export default function App() {
           <AIReportScreen 
             customerData={customerData}
             onHome={() => goHome('search', { confirm: false })}
-            onNewCustomer={() => goHome('new', { confirm: false })}
           />
         )}
       </main>
