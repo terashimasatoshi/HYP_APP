@@ -23,6 +23,27 @@ export default {
 
     if (error) return new Response(error.message, { status: 500 });
 
+    const visitIds = (visits ?? []).map((v: any) => v.id);
+
+    // ai_reports を visit_id で引いて紐付ける（最新の1件だけ）
+    const reportByVisitId = new Map<string, string>();
+    if (visitIds.length > 0) {
+      const { data: reports, error: rErr } = await supabaseAdmin
+        .from('ai_reports')
+        .select('visit_id, report_text, created_at')
+        .in('visit_id', visitIds)
+        .order('created_at', { ascending: false });
+
+      // visit_idごとに最初の1件（created_at desc の先頭）を採用
+      if (!rErr && reports) {
+        for (const r of reports as any[]) {
+          if (r?.visit_id && !reportByVisitId.has(r.visit_id)) {
+            reportByVisitId.set(r.visit_id, r.report_text ?? '');
+          }
+        }
+      }
+    }
+
     const normalize = (v: any) => {
       const before = v.hrv_measurements?.find((m: any) => m.phase === 'before') ?? null;
       const after = v.hrv_measurements?.find((m: any) => m.phase === 'after') ?? null;
@@ -34,6 +55,7 @@ export default {
         before,
         after,
         subjective: v.subjective_scores?.[0] ?? null,
+        ai_report: reportByVisitId.get(v.id) ?? null,
       };
     };
 
