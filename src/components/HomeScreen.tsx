@@ -15,6 +15,7 @@ interface HomeScreenProps {
 
 type Customer = {
   id: string;
+  customer_no?: number; // ✅ 追加：顧客番号
   full_name: string;
   phone?: string;
   email?: string;
@@ -43,6 +44,7 @@ export function HomeScreen({
 
   // 新規登録用
   const [newCustomer, setNewCustomer] = useState({
+    customerNo: '', // ✅ 追加：顧客番号入力欄（文字列で保持）
     name: '',
     age: '',
     gender: '',
@@ -62,14 +64,14 @@ export function HomeScreen({
     setSelectedCustomer(null);
     setPreviousVisit(null);
     setLoading(false);
-    setNewCustomer({ name: '', age: '', gender: '', phone: '' });
+    setNewCustomer({ customerNo: '', name: '', age: '', gender: '', phone: '' });
     setIsRegisteringCustomer(false);
   }, [resetCounter]);
 
   // 戻るボタンなどでホームに戻った場合、App側のcustomerDataに合わせて選択状態を復元
   useEffect(() => {
     if (customerData.customerId && customerData.name) {
-      setSelectedCustomer(prev => {
+      setSelectedCustomer((prev) => {
         if (prev?.id === customerData.customerId) return prev;
         return {
           id: customerData.customerId,
@@ -107,15 +109,15 @@ export function HomeScreen({
       setLoading(true);
       const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
       fetch(`${API_BASE}/api/last-two-visits?customer_id=${selectedCustomer.id}`)
-        .then(r => r.json())
-        .then(data => {
+        .then((r) => r.json())
+        .then((data) => {
           if (data.previous) {
             setPreviousVisit(data.previous);
           } else {
             setPreviousVisit(null);
           }
         })
-        .catch(err => console.error('Failed to load previous visit:', err))
+        .catch((err) => console.error('Failed to load previous visit:', err))
         .finally(() => setLoading(false));
     }
   }, [selectedCustomer]);
@@ -130,6 +132,15 @@ export function HomeScreen({
     }
   };
 
+  // ✅ 顧客番号の簡易バリデーション
+  const customerNoIsValid = (() => {
+    const raw = newCustomer.customerNo.trim();
+    if (!raw) return false;
+    if (!/^\d+$/.test(raw)) return false;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0;
+  })();
+
   // 登録処理（確認ダイアログ＋二重送信防止）
   const handleNewCustomerSubmit = async () => {
     if (isRegisteringCustomer) return;
@@ -138,9 +149,14 @@ export function HomeScreen({
       alert('お名前を入力してください');
       return;
     }
+    if (!customerNoIsValid) {
+      alert('顧客番号を正しく入力してください（数字のみ）');
+      return;
+    }
 
     const ok = confirm(
       `この内容で顧客を登録しますか？\n\n` +
+        `顧客番号: ${newCustomer.customerNo}\n` +
         `名前: ${newCustomer.name}\n` +
         `年齢: ${newCustomer.age || '-'}\n` +
         `性別: ${newCustomer.gender || '-'}\n` +
@@ -156,11 +172,12 @@ export function HomeScreen({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          customer_no: Number(newCustomer.customerNo), // ✅ 追加：顧客番号を送る
           full_name: newCustomer.name,
           phone: newCustomer.phone || null,
           gender: newCustomer.gender || null,
           birthdate: newCustomer.age
-            ? new Date(new Date().getFullYear() - parseInt(newCustomer.age), 0, 1)
+            ? new Date(new Date().getFullYear() - parseInt(newCustomer.age, 10), 0, 1)
                 .toISOString()
                 .split('T')[0]
             : null,
@@ -168,13 +185,16 @@ export function HomeScreen({
       });
 
       if (!response.ok) {
+        // APIが返すエラー文字列をそのまま表示（例：顧客番号が既に使われています）
         const text = await response.text().catch(() => '');
         throw new Error(text || `HTTP ${response.status}`);
       }
 
       const data = await response.json();
+
       const customer: Customer = {
         id: data.id,
+        customer_no: data.customer_no ?? Number(newCustomer.customerNo), // ✅ 追加
         full_name: newCustomer.name,
         phone: newCustomer.phone,
         gender: newCustomer.gender,
@@ -187,11 +207,11 @@ export function HomeScreen({
       });
 
       // フォームをリセットして検索モードへ
-      setNewCustomer({ name: '', age: '', gender: '', phone: '' });
+      setNewCustomer({ customerNo: '', name: '', age: '', gender: '', phone: '' });
       setMode('search');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create customer:', error);
-      alert('顧客登録に失敗しました');
+      alert(`顧客登録に失敗しました\n\n${error?.message ?? String(error)}`);
     } finally {
       setIsRegisteringCustomer(false);
     }
@@ -247,6 +267,11 @@ export function HomeScreen({
               {selectedCustomer && (
                 <div className="mt-4 p-4 bg-green-50 rounded-lg">
                   <p className="text-sm text-green-800">✓ {selectedCustomer.full_name} 様を選択中</p>
+
+                  {typeof selectedCustomer.customer_no === 'number' && (
+                    <p className="text-xs text-gray-600 mt-1">顧客番号: {selectedCustomer.customer_no}</p>
+                  )}
+
                   {selectedCustomer.phone && (
                     <p className="text-xs text-gray-600 mt-1">TEL: {selectedCustomer.phone}</p>
                   )}
@@ -258,6 +283,20 @@ export function HomeScreen({
           {/* New Customer Form */}
           {mode === 'new' && (
             <div className="mb-6 space-y-4">
+              <div>
+                <label className="block text-sm text-gray-700 mb-2">顧客番号 *</label>
+                <input
+                  type="number"
+                  value={newCustomer.customerNo}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, customerNo: e.target.value })}
+                  placeholder="例：123"
+                  className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-300"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  ※同姓同名対策のため、顧客番号で管理します（数字のみ）
+                </p>
+              </div>
+
               <div>
                 <label className="block text-sm text-gray-700 mb-2">お名前 *</label>
                 <input
@@ -296,7 +335,7 @@ export function HomeScreen({
               </div>
 
               <div>
-                <label className="block text-sm text-gray-700 mb-2">電話番号（顧客番号）</label>
+                <label className="block text-sm text-gray-700 mb-2">電話番号</label>
                 <input
                   type="tel"
                   value={newCustomer.phone}
@@ -310,9 +349,9 @@ export function HomeScreen({
               <button
                 type="button"
                 onClick={handleNewCustomerSubmit}
-                disabled={isRegisteringCustomer || !newCustomer.name.trim()}
+                disabled={isRegisteringCustomer || !newCustomer.name.trim() || !customerNoIsValid}
                 className={`w-full py-3 rounded-xl transition-all border-2 shadow-sm ${
-                  isRegisteringCustomer || !newCustomer.name.trim()
+                  isRegisteringCustomer || !newCustomer.name.trim() || !customerNoIsValid
                     ? 'bg-gray-200 text-gray-500 border-gray-200 cursor-not-allowed'
                     : 'bg-white text-green-700 border-green-500 hover:bg-green-50'
                 }`}
