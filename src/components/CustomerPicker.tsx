@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 
 type Customer = {
   id: string;
-  customer_no?: number; // ✅ 追加：顧客番号
+  customer_no?: number | string; // ✅ stringでも来る可能性あり
   full_name: string;
   phone?: string;
   email?: string;
@@ -32,7 +32,6 @@ export function CustomerPicker(props: {
     const controller = new AbortController();
     let alive = true;
 
-    // ✅ 軽いデバウンス（入力のたびに連打しない）
     const t = setTimeout(async () => {
       try {
         setLoading(true);
@@ -94,8 +93,10 @@ export function CustomerPicker(props: {
               <div className="min-w-0">
                 <div className="font-medium truncate">
                   {c.full_name}
-                  {typeof c.customer_no === 'number' && (
-                    <span className="ml-2 text-xs text-gray-500">（顧客番号: {c.customer_no}）</span>
+                  {c.customer_no != null && (
+                    <span className="ml-2 text-xs text-gray-500">
+                      （顧客番号: {String(c.customer_no)}）
+                    </span>
                   )}
                 </div>
                 {(c.phone || c.email) && (
