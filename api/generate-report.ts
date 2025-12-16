@@ -83,24 +83,32 @@ function normalizeVisit(v: any): NormalizedVisit | null {
 }
 
 function buildFallbackNextAction(input: any): string {
-  // “時間/回数”を必ず入れる
   const s = input?.today?.subjective ?? {};
   const sleepQ = num(s.sleep_quality);
   const stress = num(s.stress);
-  const bedtime = typeof s.bedtime === 'string' ? s.bedtime : null;
+  const heaviness = num(s.body_heaviness);
   const alcohol = s.alcohol === true;
   const caffeine = s.caffeine === true;
-  const exercise = s.exercise === true;
 
-  // 優先度の高い順に 1つだけ返す
-  if (caffeine) return '次回まで：14時以降はカフェインを避ける（まず3日間）';
-  if (alcohol) return '次回まで：就寝前に水をコップ1杯＋深呼吸3分（毎晩）';
-  if (sleepQ != null && sleepQ <= 4) return '次回まで：就寝30分前はスマホを置き、呼吸3分×2回';
-  if (stress != null && stress >= 6) return '次回まで：4秒吸って6秒吐く呼吸を3分×2回（毎日）';
-  if (bedtime) return '次回まで：就寝前に首肩ストレッチ2分＋呼吸2分（毎晩）';
-  if (exercise) return '次回まで：軽い散歩10分を週2回（できる範囲で）';
-  return '次回まで：就寝前に深呼吸3分×2回（毎日）';
+  // ここから全部「自宅でできる」系に固定（時間/回数入り）
+  if (stress != null && stress >= 6) {
+    return '次回まで：4秒吸って6秒吐く呼吸を3分×2回（毎日）';
+  }
+  if (sleepQ != null && sleepQ <= 4) {
+    return '次回まで：就寝前にスマホを置き、呼吸瞑想5分（毎晩）';
+  }
+  if (heaviness != null && heaviness >= 6) {
+    return '次回まで：頭皮を指の腹で1分＋首回し1分（毎晩）';
+  }
+  if (caffeine) {
+    return '次回まで：14時以降はカフェインを控える（まず7日間）';
+  }
+  if (alcohol) {
+    return '次回まで：就寝前に白湯200ml＋首肩ストレッチ2分（毎晩）';
+  }
+  return '次回まで：首肩ストレッチ2分＋深呼吸2分（毎晩）';
 }
+
 
 async function createCompletion(messages: any[]) {
   // response_format が環境で弾かれる可能性に備えてフォールバック付き
@@ -231,7 +239,17 @@ export default {
 - 「主観（睡眠/ストレス/重だるさ）」に必ず触れる
 - bedtime/alcohol/caffeine/exercise は、入力があるものだけ触れる（無いなら無理に書かない）
 - セルフケアは最大2つ。必ず「時間 or 回数」を入れる
-- next_action は1つだけ。40〜70文字で、時間/回数を必ず入れる（抽象は禁止）
+
+【次回来店の目安（重要）】
+- report内の「【次回来店の目安】」は必ず
+  「3〜6週間後（約1ヶ月〜1ヶ月半）」の範囲で提案する
+- 1週間後/2週間後 など “3週間未満” の提案は禁止
+
+【next_action（最重要）】
+- next_action は「自宅でできるセルフケア」1つだけ
+- 内容は瞑想/呼吸/ストレッチ/頭皮マッサージ/首肩ほぐし等の“自宅で完結する行動”
+- 来店/施術/予約/サロン/クリニック等の単語を含めるのは禁止
+- 40〜70文字で、時間/回数を必ず入れる（抽象は禁止）
 
 【reportフォーマット（この見出しを使う）】
 【本日のまとめ】
@@ -240,6 +258,7 @@ export default {
 【セルフケア（次回まで）】
 【次回来店の目安】
 `;
+
 
     const user = `
 次のDATAだけを根拠に、上のルールに従ってJSONで出力してください。
