@@ -11,11 +11,54 @@ type HRV = {
   duration_seconds?: number;
 };
 
+type SubjectiveBefore = {
+  // 新仕様（snake_case）
+  sleep_quality?: number;
+  stress?: number;
+  body_heaviness?: number;
+  bedtime?: string; // "HH:MM" or "HH:MM:SS"
+  alcohol?: boolean;
+  caffeine?: boolean;
+  exercise?: boolean;
+
+  // 互換（camelCase）
+  sleepQuality?: number;
+  bodyHeaviness?: number;
+};
+
+type SubjectiveAfter = {
+  // 新仕様（snake_case）
+  sleep_quality?: number;
+  stress?: number;
+  body_heaviness?: number;
+
+  // 互換（camelCase）
+  sleepQuality?: number;
+  bodyHeaviness?: number;
+};
+
+function normalizeTimeToHHMMSS(t?: string | null): string | null {
+  if (!t) return null;
+  const s = String(t).trim();
+  if (!s) return null;
+  // "23:00" -> "23:00:00"
+  if (s.length === 5 && /^\d{2}:\d{2}$/.test(s)) return `${s}:00`;
+  // "23:00:00" はそのまま
+  return s;
+}
+
+function pickNumber(v: any): number | null {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export default {
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
 
     const payload = await request.json().catch(() => null);
+    if (!payload) return new Response('Invalid JSON', { status: 400 });
 
     // 必須チェック
     const customerId: string | undefined = payload?.customer?.id;
@@ -31,6 +74,8 @@ export default {
         .from('customers')
         .insert({
           full_name: fullName!,
+          // ここは来る可能性があるものだけ入れる（無ければnull）
+          customer_no: payload?.customer?.customer_no ?? null,
           phone: payload?.customer?.phone ?? null,
           email: payload?.customer?.email ?? null,
           gender: payload?.customer?.gender ?? null,
@@ -66,28 +111,64 @@ export default {
     const before: HRV | undefined = payload?.before;
     const after: HRV | undefined = payload?.after;
 
-    const rows: any[] = [];
-    if (before) rows.push({ visit_id: visitId, phase: 'before', ...before });
-    if (after) rows.push({ visit_id: visitId, phase: 'after', ...after });
+    const hrvRows: any[] = [];
+    if (before) hrvRows.push({ visit_id: visitId, phase: 'before', ...before });
+    if (after) hrvRows.push({ visit_id: visitId, phase: 'after', ...after });
 
-    if (rows.length) {
-      const { error: hErr } = await supabaseAdmin.from('hrv_measurements').insert(rows);
+    if (hrvRows.length) {
+      const { error: hErr } = await supabaseAdmin.from('hrv_measurements').insert(hrvRows);
       if (hErr) return new Response(hErr.message, { status: 500 });
     }
 
-    // 主観スコア
-    const s = payload?.subjective;
-    if (s) {
-      const { error: sErr } = await supabaseAdmin.from('subjective_scores').insert({
+    // =========================
+    // 主観スコア（before/after）
+    // =========================
+    // 新仕様：
+    //   payload.subjective_before（phase='before'）
+    //   payload.subjective_after  （phase='after'）
+    //
+    // 互換仕様（旧）：
+    //   payload.subjective -> before扱い（今までのフロントが送ってた形式）
+    const sbBefore: SubjectiveBefore | undefined =
+      payload?.subjective_before ?? payload?.subjective ?? undefined;
+
+    const sbAfter: SubjectiveAfter | undefined = payload?.subjective_after ?? undefined;
+
+    const subjectiveRows: any[] = [];
+
+    // before（施術前）
+    if (sbBefore) {
+      subjectiveRows.push({
         visit_id: visitId,
-        sleep_quality: s.sleepQuality ?? null,
-        stress: s.stress ?? null,
-        body_heaviness: s.bodyHeaviness ?? null,
-        bedtime: s.bedtime ? (s.bedtime.length === 5 ? s.bedtime + ':00' : s.bedtime) : null,
-        alcohol: !!s.alcohol,
-        caffeine: !!s.caffeine,
-        exercise: !!s.exercise,
+        phase: 'before',
+        sleep_quality: pickNumber(sbBefore.sleep_quality ?? sbBefore.sleepQuality),
+        stress: pickNumber(sbBefore.stress),
+        body_heaviness: pickNumber(sbBefore.body_heaviness ?? sbBefore.bodyHeaviness),
+        bedtime: normalizeTimeToHHMMSS((sbBefore as any).bedtime ?? null),
+        alcohol: Boolean((sbBefore as any).alcohol),
+        caffeine: Boolean((sbBefore as any).caffeine),
+        exercise: Boolean((sbBefore as any).exercise),
       });
+    }
+
+    // after（施術後）
+    if (sbAfter) {
+      subjectiveRows.push({
+        visit_id: visitId,
+        phase: 'after',
+        sleep_quality: pickNumber(sbAfter.sleep_quality ?? sbAfter.sleepQuality),
+        stress: pickNumber(sbAfter.stress),
+        body_heaviness: pickNumber(sbAfter.body_heaviness ?? sbAfter.bodyHeaviness),
+        // 施術後は「3スライダーのみ」の想定なので生活習慣は入れない（必要なら後で追加OK）
+      });
+    }
+
+    if (subjectiveRows.length) {
+      // ✅ (visit_id, phase) のユニーク制約/Index がある前提で upsert
+      const { error: sErr } = await supabaseAdmin
+        .from('subjective_scores')
+        .upsert(subjectiveRows, { onConflict: 'visit_id,phase' });
+
       if (sErr) return new Response(sErr.message, { status: 500 });
     }
 
