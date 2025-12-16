@@ -1,44 +1,101 @@
-import { useMemo } from 'react';
-import type { CustomerData } from '../App';
-import { Sparkles, Moon, Brain, Briefcase, Home, ArrowRight } from 'lucide-react';
+// src/components/AfterConditionScreen.tsx
+import { useEffect } from 'react';
+import { CustomerData } from '../App';
+import { Moon, Brain, Briefcase, Home, ArrowRight } from 'lucide-react';
 
 interface AfterConditionScreenProps {
   customerData: CustomerData;
   updateCustomerData: (data: Partial<CustomerData>) => void;
   onNext: () => void;
-  onHome?: () => void;
+  onHome?: () => void; // 画面内の「ホームへ」ボタンを出したい場合に渡す（HeaderのHomeだけでOKなら省略可）
 }
 
-/**
- * 施術後の体感（3スライダー）
- * - 施術前(Counseling)と同じカードサイズ感に寄せる（3カード横並び）
- * - 最後の「診断へ進む」ボタンの文字が消えないようにする
- *
- * ※ CustomerData に afterSleepQuality / afterStress / afterBodyHeaviness がある想定
- *   まだ型に無い場合でも落ちないように (customerData as any) で参照しています。
- */
-
-function clamp0to10(n: number) {
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(10, Math.round(n)));
-}
-
-function signed(n: number) {
-  const v = Math.round(n);
-  return v >= 0 ? `+${v}` : `${v}`;
-}
-
-type CardSpec = {
-  key: 'afterSleepQuality' | 'afterStress' | 'afterBodyHeaviness';
-  title: string;
-  scaleLeft: string;
-  scaleRight: string;
-  icon: React.ReactNode;
-  valueColorClass: string;
-  iconBgClass: string;
-  iconColorClass: string;
-  beforeKey: 'sleepQuality' | 'stress' | 'bodyHeaviness';
+type CustomerDataWithAfter = CustomerData & {
+  afterSleepQuality?: number;
+  afterStress?: number;
+  afterBodyHeaviness?: number;
 };
+
+function clamp0to10(v: number) {
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(10, v));
+}
+
+function toInt0to10(v: string) {
+  const n = Number.parseInt(v, 10);
+  return clamp0to10(Number.isFinite(n) ? n : 0);
+}
+
+function fmtDiff(d: number) {
+  const sign = d >= 0 ? '+' : '';
+  return `${sign}${d}`;
+}
+
+function DiffBadge({ before, after }: { before: number; after: number }) {
+  const d = after - before;
+  return (
+    <div className="mt-4 bg-gray-50 rounded-xl p-3 text-xs text-gray-600">
+      <div className="font-medium">施術前 → 施術後</div>
+      <div className="mt-1">
+        {before} → {after}（差分 {fmtDiff(d)}）
+      </div>
+    </div>
+  );
+}
+
+type ScoreCardProps = {
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  value: number;
+  onChange: (n: number) => void;
+  beforeValue: number;
+  valueClassName: string;
+};
+
+function ScoreCard({
+  icon,
+  title,
+  subtitle,
+  value,
+  onChange,
+  beforeValue,
+  valueClassName,
+}: ScoreCardProps) {
+  return (
+    <div className="bg-white rounded-2xl shadow-lg p-6 h-full flex flex-col">
+      <div className="flex items-start gap-3">
+        <div className="w-12 h-12 rounded-2xl bg-gray-50 flex items-center justify-center">
+          {icon}
+        </div>
+        <div>
+          <div className="text-sm text-gray-800 font-medium">{title}</div>
+          <div className="text-xs text-gray-500">{subtitle}</div>
+        </div>
+      </div>
+
+      <div className={`mt-4 text-5xl leading-none font-semibold ${valueClassName}`}>{value}</div>
+
+      <div className="mt-4">
+        <input
+          type="range"
+          min={0}
+          max={10}
+          step={1}
+          value={value}
+          onChange={(e) => onChange(toInt0to10(e.target.value))}
+          className="w-full"
+        />
+        <div className="flex justify-between text-xs text-gray-400 mt-1">
+          <span>0</span>
+          <span>10</span>
+        </div>
+      </div>
+
+      <DiffBadge before={beforeValue} after={value} />
+    </div>
+  );
+}
 
 export function AfterConditionScreen({
   customerData,
@@ -46,183 +103,112 @@ export function AfterConditionScreen({
   onNext,
   onHome,
 }: AfterConditionScreenProps) {
-  const cdAny = customerData as any;
+  const cd = customerData as CustomerDataWithAfter;
 
-  // 施術前（Counseling）
-  const beforeSleep = clamp0to10(Number(cdAny.sleepQuality ?? 5));
-  const beforeStress = clamp0to10(Number(cdAny.stress ?? 5));
-  const beforeHeavy = clamp0to10(Number(cdAny.bodyHeaviness ?? 5));
+  const beforeSleep = clamp0to10(customerData.sleepQuality);
+  const beforeStress = clamp0to10(customerData.stress);
+  const beforeHeavy = clamp0to10(customerData.bodyHeaviness);
 
-  // 施術後（AfterCondition）
-  const afterSleep = clamp0to10(Number(cdAny.afterSleepQuality ?? 0));
-  const afterStress = clamp0to10(Number(cdAny.afterStress ?? 0));
-  const afterHeavy = clamp0to10(Number(cdAny.afterBodyHeaviness ?? 0));
+  const afterSleep = clamp0to10(cd.afterSleepQuality ?? beforeSleep);
+  const afterStress = clamp0to10(cd.afterStress ?? beforeStress);
+  const afterHeavy = clamp0to10(cd.afterBodyHeaviness ?? beforeHeavy);
 
-  // 3つ揃っていれば次へ（0も入力として許容）
-  const canNext =
-    typeof cdAny.afterSleepQuality === 'number' &&
-    typeof cdAny.afterStress === 'number' &&
-    typeof cdAny.afterBodyHeaviness === 'number';
+  // 初期値が未設定の場合、施術前の値で埋める（差分0からスタート）
+  useEffect(() => {
+    const patch: any = {};
+    if (cd.afterSleepQuality == null) patch.afterSleepQuality = beforeSleep;
+    if (cd.afterStress == null) patch.afterStress = beforeStress;
+    if (cd.afterBodyHeaviness == null) patch.afterBodyHeaviness = beforeHeavy;
 
-  const specs: CardSpec[] = useMemo(
-    () => [
-      {
-        key: 'afterSleepQuality',
-        beforeKey: 'sleepQuality',
-        title: '睡眠の質（施術後）',
-        scaleLeft: '悪い',
-        scaleRight: '良い',
-        icon: <Moon className="w-6 h-6" />,
-        valueColorClass: 'text-blue-600',
-        iconBgClass: 'bg-blue-50',
-        iconColorClass: 'text-blue-600',
-      },
-      {
-        key: 'afterStress',
-        beforeKey: 'stress',
-        title: 'ストレス（施術後）',
-        scaleLeft: '低い',
-        scaleRight: '高い',
-        icon: <Brain className="w-6 h-6" />,
-        valueColorClass: 'text-orange-600',
-        iconBgClass: 'bg-orange-50',
-        iconColorClass: 'text-orange-600',
-      },
-      {
-        key: 'afterBodyHeaviness',
-        beforeKey: 'bodyHeaviness',
-        title: '頭皮・身体の重さ（施術後）',
-        scaleLeft: '軽い',
-        scaleRight: '重い',
-        icon: <Briefcase className="w-6 h-6" />,
-        valueColorClass: 'text-purple-600',
-        iconBgClass: 'bg-purple-50',
-        iconColorClass: 'text-purple-600',
-      },
-    ],
-    []
-  );
+    if (Object.keys(patch).length > 0) {
+      updateCustomerData(patch as any);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cd.afterSleepQuality, cd.afterStress, cd.afterBodyHeaviness, beforeSleep, beforeStress, beforeHeavy]);
 
-  const setAfterValue = (key: CardSpec['key'], value: number) => {
-    updateCustomerData({ [key]: clamp0to10(value) } as any);
-  };
-
-  const getAfterValue = (key: CardSpec['key']) => {
-    if (key === 'afterSleepQuality') return afterSleep;
-    if (key === 'afterStress') return afterStress;
-    return afterHeavy;
-  };
-
-  const getBeforeValue = (beforeKey: CardSpec['beforeKey']) => {
-    if (beforeKey === 'sleepQuality') return beforeSleep;
-    if (beforeKey === 'stress') return beforeStress;
-    return beforeHeavy;
-  };
-
-  const deltaSleep = afterSleep - beforeSleep;
-  const deltaStress = afterStress - beforeStress;
-  const deltaHeavy = afterHeavy - beforeHeavy;
+  const canNext = true;
 
   return (
     <div className="h-full p-8 overflow-y-auto">
-      <div className="max-w-6xl mx-auto">
-        {/* Title Card（Counselingと同じノリ） */}
-        <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-          <div className="flex items-center gap-2 text-green-800 font-semibold">
-            <Sparkles className="w-5 h-5 text-green-600" />
-            施術後カウンセリング
-          </div>
-          <p className="text-sm text-gray-600 mt-1">施術後の体感コンディションを入力してください</p>
+      <div className="max-w-7xl mx-auto pb-28">
+        <div className="bg-white rounded-2xl shadow-lg p-8 mb-6">
+          <h2 className="text-green-800 font-semibold mb-2">施術後の体感チェック</h2>
+          <p className="text-sm text-gray-600">施術後のコンディションを入力してください（0〜10）</p>
         </div>
 
-        {/* ✅ 施術前と同じ「3カード横並び」 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {specs.map((s) => {
-            const before = getBeforeValue(s.beforeKey);
-            const after = getAfterValue(s.key);
-            const delta = after - before;
+        {/* ✅ ここを「縦並び」→「横並び（PCは3列）」に */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+          <ScoreCard
+            icon={<Moon className="w-6 h-6 text-blue-600" />}
+            title="睡眠の質（施術後）"
+            subtitle="0: 悪い / 10: 良い"
+            value={afterSleep}
+            beforeValue={beforeSleep}
+            valueClassName="text-blue-600"
+            onChange={(n) => updateCustomerData({ afterSleepQuality: n } as any)}
+          />
 
-            return (
-              <div key={s.key} className="bg-white rounded-2xl shadow-lg p-6">
-                <div className="flex items-start gap-4">
-                  <div
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center ${s.iconBgClass} ${s.iconColorClass}`}
-                  >
-                    {s.icon}
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-sm text-gray-800 font-medium">{s.title}</div>
-                    <div className="text-xs text-gray-500 mt-1">0: {s.scaleLeft} / 10: {s.scaleRight}</div>
-                  </div>
-                </div>
+          <ScoreCard
+            icon={<Brain className="w-6 h-6 text-orange-600" />}
+            title="ストレス（施術後）"
+            subtitle="0: 低い / 10: 高い"
+            value={afterStress}
+            beforeValue={beforeStress}
+            valueClassName="text-orange-600"
+            onChange={(n) => updateCustomerData({ afterStress: n } as any)}
+          />
 
-                <div className={`text-4xl font-semibold mt-4 ${s.valueColorClass}`}>{after}</div>
-
-                {/* Slider */}
-                <input
-                  type="range"
-                  min={0}
-                  max={10}
-                  step={1}
-                  value={after}
-                  onChange={(e) => setAfterValue(s.key, Number(e.target.value))}
-                  className="w-full mt-4 accent-gray-900"
-                />
-                <div className="flex justify-between text-xs text-gray-400 mt-1">
-                  <span>0</span>
-                  <span>10</span>
-                </div>
-
-                {/* before→after & delta */}
-                <div className="mt-4 bg-gray-50 rounded-xl p-3">
-                  <div className="text-xs text-gray-600">施術前 → 施術後</div>
-                  <div className="text-sm text-gray-800 mt-1">
-                    {before} → {after}（差分 {signed(delta)}）
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          <ScoreCard
+            icon={<Briefcase className="w-6 h-6 text-purple-600" />}
+            title="頭皮・身体の重さ（施術後）"
+            subtitle="0: 軽い / 10: 重い"
+            value={afterHeavy}
+            beforeValue={beforeHeavy}
+            valueClassName="text-purple-600"
+            onChange={(n) => updateCustomerData({ afterBodyHeaviness: n } as any)}
+          />
         </div>
 
-        {/* 差分まとめ（既存の意図を残す） */}
-        <div className="bg-white rounded-2xl shadow-lg p-6 mt-6">
-          <div className="text-sm text-gray-800 font-semibold mb-3">施術前 → 施術後（体感差分まとめ）</div>
+        {/* 差分まとめ */}
+        <div className="bg-white rounded-2xl shadow-lg p-6">
+          <h3 className="text-sm text-gray-800 font-medium mb-4">施術前 → 施術後（体感差分まとめ）</h3>
 
           <div className="space-y-3">
             <div className="bg-gray-50 rounded-xl p-4">
-              <div className="text-xs text-gray-600">睡眠の質</div>
-              <div className="text-sm text-gray-800 mt-1">
-                {beforeSleep} → {afterSleep}（{signed(deltaSleep)}）
+              <div className="text-xs text-gray-500 mb-1">睡眠の質</div>
+              <div className="text-sm text-gray-800">
+                {beforeSleep} → {afterSleep}（{fmtDiff(afterSleep - beforeSleep)}）
               </div>
             </div>
+
             <div className="bg-gray-50 rounded-xl p-4">
-              <div className="text-xs text-gray-600">ストレス</div>
-              <div className="text-sm text-gray-800 mt-1">
-                {beforeStress} → {afterStress}（{signed(deltaStress)}）
+              <div className="text-xs text-gray-500 mb-1">ストレス</div>
+              <div className="text-sm text-gray-800">
+                {beforeStress} → {afterStress}（{fmtDiff(afterStress - beforeStress)}）
               </div>
             </div>
+
             <div className="bg-gray-50 rounded-xl p-4">
-              <div className="text-xs text-gray-600">重だるさ</div>
-              <div className="text-sm text-gray-800 mt-1">
-                {beforeHeavy} → {afterHeavy}（{signed(deltaHeavy)}）
+              <div className="text-xs text-gray-500 mb-1">重だるさ</div>
+              <div className="text-sm text-gray-800">
+                {beforeHeavy} → {afterHeavy}（{fmtDiff(afterHeavy - beforeHeavy)}）
               </div>
             </div>
           </div>
 
-          <p className="text-xs text-gray-400 mt-4">
-            ※ここで入力した「施術後の体感」は、AIレポート生成に加味できます（save-visit / generate-report 対応時）
+          <p className="mt-4 text-xs text-gray-400">
+            ※ここで入力した「施術後の体感」は、AIレポート生成に加味されます
           </p>
         </div>
 
-        {/* ✅ 画面下部アクション（文字が消えない配色に修正） */}
-        <div className="mt-6">
-          <div className="flex gap-4 items-center">
+        {/* 下部ボタン */}
+        <div className="sticky bottom-0 mt-6">
+          <div className="bg-white/80 backdrop-blur rounded-2xl shadow-lg border border-green-100 p-4 flex items-center gap-4">
             {onHome && (
               <button
                 type="button"
                 onClick={onHome}
-                className="px-5 py-3 rounded-xl bg-white border border-green-200 text-green-700 hover:bg-green-50 shadow-sm flex items-center gap-2"
+                className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
               >
                 <Home className="w-5 h-5" />
                 ホームへ
@@ -233,22 +219,16 @@ export function AfterConditionScreen({
               type="button"
               onClick={onNext}
               disabled={!canNext}
-              className={`flex-1 py-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 ${
+              className={`ml-auto flex items-center justify-center gap-2 px-6 py-4 rounded-xl shadow-md transition-all ${
                 canNext
                   ? 'bg-gradient-to-r from-green-400 to-emerald-500 text-white hover:shadow-lg'
-                  : 'bg-gray-200 text-gray-600 cursor-not-allowed'
+                  : 'bg-gray-200 text-gray-500 cursor-not-allowed'
               }`}
             >
               診断へ進む
               <ArrowRight className="w-5 h-5" />
             </button>
           </div>
-
-          {!canNext && (
-            <p className="text-xs text-gray-400 mt-2">
-              ※3項目すべて入力すると「診断へ進む」が有効になります
-            </p>
-          )}
         </div>
       </div>
     </div>
