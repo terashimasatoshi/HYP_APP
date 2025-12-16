@@ -1,7 +1,10 @@
+
+
 // src/components/AfterConditionScreen.tsx
 import { useEffect } from 'react';
 import { CustomerData } from '../App';
-import { Moon, Brain, Briefcase, Home, ArrowRight } from 'lucide-react';
+import { Moon, Brain, Weight, Home, ArrowRight } from 'lucide-react';
+import { Slider } from './ui/slider';
 
 interface AfterConditionScreenProps {
   customerData: CustomerData;
@@ -21,11 +24,6 @@ function clamp0to10(v: number) {
   return Math.max(0, Math.min(10, v));
 }
 
-function toInt0to10(v: string) {
-  const n = Number.parseInt(v, 10);
-  return clamp0to10(Number.isFinite(n) ? n : 0);
-}
-
 function fmtDiff(d: number) {
   const sign = d >= 0 ? '+' : '';
   return `${sign}${d}`;
@@ -34,7 +32,7 @@ function fmtDiff(d: number) {
 function DiffBadge({ before, after }: { before: number; after: number }) {
   const d = after - before;
   return (
-    <div className="mt-4 bg-gray-50 rounded-xl p-3 text-xs text-gray-600">
+    <div className="mt-2 bg-gray-50 rounded-xl p-2 text-xs text-gray-600">
       <div className="font-medium">施術前 → 施術後</div>
       <div className="mt-1">
         {before} → {after}（差分 {fmtDiff(d)}）
@@ -45,6 +43,7 @@ function DiffBadge({ before, after }: { before: number; after: number }) {
 
 type ScoreCardProps = {
   icon: React.ReactNode;
+  iconBgClassName: string;
   title: string;
   subtitle: string;
   value: number;
@@ -55,6 +54,7 @@ type ScoreCardProps = {
 
 function ScoreCard({
   icon,
+  iconBgClassName,
   title,
   subtitle,
   value,
@@ -63,31 +63,32 @@ function ScoreCard({
   valueClassName,
 }: ScoreCardProps) {
   return (
-    <div className="bg-white rounded-2xl shadow-lg p-6 h-full flex flex-col">
-      <div className="flex items-start gap-3">
-        <div className="w-12 h-12 rounded-2xl bg-gray-50 flex items-center justify-center">
+    <div className="bg-white rounded-2xl shadow-lg p-6">
+      <div className="flex items-center gap-3 mb-6">
+        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${iconBgClassName}`}>
           {icon}
         </div>
         <div>
-          <div className="text-sm text-gray-800 font-medium">{title}</div>
-          <div className="text-xs text-gray-500">{subtitle}</div>
+          <h3 className="text-gray-800">{title}</h3>
+          <p className="text-xs text-gray-500">{subtitle}</p>
         </div>
       </div>
-
-      <div className={`mt-4 text-5xl leading-none font-semibold ${valueClassName}`}>{value}</div>
-
-      <div className="mt-4">
-        <input
-          type="range"
+      
+      <div className="mb-4">
+        <div className={`text-4xl text-center mb-4 ${valueClassName}`}>
+          {value}
+        </div>
+        <Slider
+          value={[value]}
+          onValueChange={([v]) => onChange(v)}
           min={0}
           max={10}
           step={1}
-          value={value}
-          onChange={(e) => onChange(toInt0to10(e.target.value))}
-          className="w-full"
+          className="mb-2"
         />
-        <div className="flex justify-between text-xs text-gray-400 mt-1">
+        <div className="flex justify-between text-xs text-gray-400">
           <span>0</span>
+          <span>5</span>
           <span>10</span>
         </div>
       </div>
@@ -137,9 +138,10 @@ export function AfterConditionScreen({
         </div>
 
         {/* ✅ ここを「縦並び」→「横並び（PCは3列）」に */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <div className="grid grid-cols-3 gap-6 mb-6">
           <ScoreCard
             icon={<Moon className="w-6 h-6 text-blue-600" />}
+            iconBgClassName="bg-blue-100"
             title="睡眠の質（施術後）"
             subtitle="0: 悪い / 10: 良い"
             value={afterSleep}
@@ -150,6 +152,7 @@ export function AfterConditionScreen({
 
           <ScoreCard
             icon={<Brain className="w-6 h-6 text-orange-600" />}
+            iconBgClassName="bg-orange-100"
             title="ストレス（施術後）"
             subtitle="0: 低い / 10: 高い"
             value={afterStress}
@@ -159,7 +162,8 @@ export function AfterConditionScreen({
           />
 
           <ScoreCard
-            icon={<Briefcase className="w-6 h-6 text-purple-600" />}
+            icon={<Weight className="w-6 h-6 text-purple-600" />}
+            iconBgClassName="bg-purple-100"
             title="頭皮・身体の重さ（施術後）"
             subtitle="0: 軽い / 10: 重い"
             value={afterHeavy}
