@@ -44,13 +44,22 @@ function normalizeTimeToHHMMSS(t?: string | null): string | null {
   // "23:00" -> "23:00:00"
   if (s.length === 5 && /^\d{2}:\d{2}$/.test(s)) return `${s}:00`;
   // "23:00:00" はそのまま
+  if (/^\d{2}:\d{2}:\d{2}$/.test(s)) return s;
+  // それ以外は一旦そのまま（必要なら後で厳格化）
   return s;
 }
 
 function pickNumber(v: any): number | null {
   if (v === null || v === undefined) return null;
+  if (typeof v === 'string' && v.trim() === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function pickBool(v: any): boolean | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'boolean') return v;
+  return null;
 }
 
 export default {
@@ -58,24 +67,39 @@ export default {
     if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
 
     const payload = await request.json().catch(() => null);
-    if (!payload) return new Response('Invalid JSON', { status: 400 });
+    if (!payload || typeof payload !== 'object') return new Response('Invalid JSON', { status: 400 });
 
     // 必須チェック
     const customerId: string | undefined = payload?.customer?.id;
     const fullName: string | undefined = payload?.customer?.full_name;
+
     if (!customerId && !fullName) {
       return new Response('customer.id or customer.full_name is required', { status: 400 });
     }
 
+    // =========================
     // 顧客ID未指定なら作成
+    // =========================
     let ensuredCustomerId = customerId;
+
     if (!ensuredCustomerId) {
+      // customer_no を安全に数値化（無ければnull）
+      let customerNo: number | null = null;
+      const rawNo = payload?.customer?.customer_no;
+
+      if (rawNo !== undefined && rawNo !== null && rawNo !== '') {
+        const n = Number(rawNo);
+        if (!Number.isFinite(n) || n <= 0) {
+          return new Response('customer.customer_no must be a positive number', { status: 400 });
+        }
+        customerNo = n;
+      }
+
       const { data, error } = await supabaseAdmin
         .from('customers')
         .insert({
           full_name: fullName!,
-          // ここは来る可能性があるものだけ入れる（無ければnull）
-          customer_no: payload?.customer?.customer_no ?? null,
+          customer_no: customerNo,
           phone: payload?.customer?.phone ?? null,
           email: payload?.customer?.email ?? null,
           gender: payload?.customer?.gender ?? null,
@@ -85,12 +109,22 @@ export default {
         .select('id')
         .single();
 
-      if (error) return new Response(error.message, { status: 500 });
+      if (error) {
+        // unique 制約違反（顧客番号など）
+        if ((error as any).code === '23505') {
+          return new Response('顧客番号が既に使われています', { status: 409 });
+        }
+        return new Response(error.message, { status: 500 });
+      }
+
       ensuredCustomerId = data!.id;
     }
 
+    // =========================
     // visit 作成
-    const visitDate = payload?.visit?.visit_date ?? null; // "YYYY-MM-DD"
+    // =========================
+    const visitDate = payload?.visit?.visit_date ?? new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+
     const { data: visit, error: vErr } = await supabaseAdmin
       .from('visits')
       .insert({
@@ -107,7 +141,9 @@ export default {
 
     const visitId = visit!.id as string;
 
+    // =========================
     // HRV（before/after）
+    // =========================
     const before: HRV | undefined = payload?.before;
     const after: HRV | undefined = payload?.after;
 
@@ -128,7 +164,7 @@ export default {
     //   payload.subjective_after  （phase='after'）
     //
     // 互換仕様（旧）：
-    //   payload.subjective -> before扱い（今までのフロントが送ってた形式）
+    //   payload.subjective -> before扱い
     const sbBefore: SubjectiveBefore | undefined =
       payload?.subjective_before ?? payload?.subjective ?? undefined;
 
@@ -137,29 +173,35 @@ export default {
     const subjectiveRows: any[] = [];
 
     // before（施術前）
-    if (sbBefore) {
+    if (sbBefore && typeof sbBefore === 'object') {
       subjectiveRows.push({
         visit_id: visitId,
         phase: 'before',
         sleep_quality: pickNumber(sbBefore.sleep_quality ?? sbBefore.sleepQuality),
         stress: pickNumber(sbBefore.stress),
         body_heaviness: pickNumber(sbBefore.body_heaviness ?? sbBefore.bodyHeaviness),
+
         bedtime: normalizeTimeToHHMMSS((sbBefore as any).bedtime ?? null),
-        alcohol: Boolean((sbBefore as any).alcohol),
-        caffeine: Boolean((sbBefore as any).caffeine),
-        exercise: Boolean((sbBefore as any).exercise),
+        alcohol: pickBool((sbBefore as any).alcohol),
+        caffeine: pickBool((sbBefore as any).caffeine),
+        exercise: pickBool((sbBefore as any).exercise),
       });
     }
 
     // after（施術後）
-    if (sbAfter) {
+    if (sbAfter && typeof sbAfter === 'object') {
       subjectiveRows.push({
         visit_id: visitId,
         phase: 'after',
         sleep_quality: pickNumber(sbAfter.sleep_quality ?? sbAfter.sleepQuality),
         stress: pickNumber(sbAfter.stress),
         body_heaviness: pickNumber(sbAfter.body_heaviness ?? sbAfter.bodyHeaviness),
-        // 施術後は「3スライダーのみ」の想定なので生活習慣は入れない（必要なら後で追加OK）
+
+        // 施術後は3スライダーのみ想定：生活習慣系はnull固定（混入防止）
+        bedtime: null,
+        alcohol: null,
+        caffeine: null,
+        exercise: null,
       });
     }
 
