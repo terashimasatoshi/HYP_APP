@@ -1,11 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CustomerData } from '../App';
 import { TrendingUp, Sparkles, Lightbulb, Home, Save } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { ImprovementChart } from './ImprovementChart';
 
+type CustomerDataWithAfterSubjective = CustomerData & {
+  // ✅ 施術後体感（AfterConditionScreen）で入れる3スライダー想定
+  afterSleepQuality?: number;
+  afterStress?: number;
+  afterBodyHeaviness?: number;
+};
+
 interface AIReportScreenProps {
-  customerData: CustomerData;
+  customerData: CustomerDataWithAfterSubjective;
   onHome: () => void;
 }
 
@@ -14,9 +21,16 @@ type VisitData = {
   date?: string;
   before?: { rmssd?: number; sdnn?: number; heart_rate?: number };
   after?: { rmssd?: number; sdnn?: number; heart_rate?: number };
+
+  // 既存の last-two-visits 互換（今は使ってないが残す）
   subjective?: { sleep_quality?: number; stress?: number; body_heaviness?: number };
+
   ai_report?: string | null;
 };
+
+function isFiniteNumber(v: any): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
 
 export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
   const [aiReport, setAiReport] = useState<string>('');
@@ -37,33 +51,76 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
   // 戻る→進むで二重登録を避ける簡易キャッシュ
   const reportCacheKey = 'hyp:reportCache:v1';
 
+  // ✅ 施術後主観（AfterConditionScreen）値を安全に取得
+  const afterSleepQuality = isFiniteNumber(customerData.afterSleepQuality) ? customerData.afterSleepQuality : null;
+  const afterStress = isFiniteNumber(customerData.afterStress) ? customerData.afterStress : null;
+  const afterBodyHeaviness = isFiniteNumber(customerData.afterBodyHeaviness) ? customerData.afterBodyHeaviness : null;
+
+  // ✅ 施術後主観が実際に入力されているか（全部null/undefinedなら送らない）
+  const hasSubjectiveAfter = useMemo(() => {
+    return [afterSleepQuality, afterStress, afterBodyHeaviness].some((v) => v != null);
+  }, [afterSleepQuality, afterStress, afterBodyHeaviness]);
+
+  // ✅ fingerprint（キャッシュ一致判定）に after 主観も含める
+  const fingerprint = useMemo(() => {
+    return JSON.stringify({
+      customerId: customerData.customerId ?? null,
+      name: customerData.name ?? null,
+      menu: customerData.menu ?? null,
+      staff: customerData.staff ?? null,
+      date: new Date().toISOString().split('T')[0],
+
+      beforeRMSSD: customerData.beforeRMSSD,
+      beforeSDNN: customerData.beforeSDNN,
+      beforeHR: customerData.beforeHeartRate,
+
+      afterRMSSD: customerData.afterRMSSD,
+      afterSDNN: customerData.afterSDNN,
+      afterHR: customerData.afterHeartRate,
+
+      // 施術前（既存）
+      sleepQuality: customerData.sleepQuality,
+      stress: customerData.stress,
+      bodyHeaviness: customerData.bodyHeaviness,
+      bedtime: customerData.bedtime,
+      alcohol: customerData.alcohol,
+      caffeine: customerData.caffeine,
+      exercise: customerData.exercise,
+
+      // ✅ 施術後（新規）
+      afterSleepQuality,
+      afterStress,
+      afterBodyHeaviness,
+    });
+  }, [
+    customerData.customerId,
+    customerData.name,
+    customerData.menu,
+    customerData.staff,
+    customerData.beforeRMSSD,
+    customerData.beforeSDNN,
+    customerData.beforeHeartRate,
+    customerData.afterRMSSD,
+    customerData.afterSDNN,
+    customerData.afterHeartRate,
+    customerData.sleepQuality,
+    customerData.stress,
+    customerData.bodyHeaviness,
+    customerData.bedtime,
+    customerData.alcohol,
+    customerData.caffeine,
+    customerData.exercise,
+    afterSleepQuality,
+    afterStress,
+    afterBodyHeaviness,
+  ]);
+
   useEffect(() => {
     const saveAndGenerate = async () => {
       setIsLoading(true);
       setError(null);
       setSaveError(null);
       setIsDiagnosisSaved(false);
-
-      const fingerprint = JSON.stringify({
-        customerId: customerData.customerId ?? null,
-        name: customerData.name ?? null,
-        menu: customerData.menu ?? null,
-        staff: customerData.staff ?? null,
-        date: new Date().toISOString().split('T')[0],
-        beforeRMSSD: customerData.beforeRMSSD,
-        beforeSDNN: customerData.beforeSDNN,
-        beforeHR: customerData.beforeHeartRate,
-        afterRMSSD: customerData.afterRMSSD,
-        afterSDNN: customerData.afterSDNN,
-        afterHR: customerData.afterHeartRate,
-        sleepQuality: customerData.sleepQuality,
-        stress: customerData.stress,
-        bodyHeaviness: customerData.bodyHeaviness,
-        bedtime: customerData.bedtime,
-        alcohol: customerData.alcohol,
-        caffeine: customerData.caffeine,
-        exercise: customerData.exercise,
-      });
 
       // キャッシュが同一なら復元
       try {
@@ -73,7 +130,10 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
           if (cached?.fingerprint === fingerprint) {
             setVisitId(cached.visit_id ?? null);
             setAiReport(cached.report ?? '');
-            setNextAction(cached.next_action ?? '');
+
+            // next_action が空でも枠が消えないように、空文字は避ける
+            const cachedNext = (cached.next_action ?? '').trim();
+            setNextAction(cachedNext);
 
             if (cached.customer_id) {
               const lastTwoResponse = await fetch(
@@ -95,7 +155,31 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
       }
 
       try {
+        // ✅ 主観：施術前（before）
+        const subjectiveBefore = {
+          sleepQuality: customerData.sleepQuality,
+          stress: customerData.stress,
+          bodyHeaviness: customerData.bodyHeaviness,
+          bedtime: customerData.bedtime,
+          alcohol: customerData.alcohol,
+          caffeine: customerData.caffeine,
+          exercise: customerData.exercise,
+        };
+
+        // ✅ 主観：施術後（after）3スライダー
+        const subjectiveAfter = hasSubjectiveAfter
+          ? {
+              sleepQuality: afterSleepQuality,
+              stress: afterStress,
+              bodyHeaviness: afterBodyHeaviness,
+            }
+          : undefined;
+
         // ① visit/測定/主観データ保存（customer_idに紐付く）
+        // 互換のため:
+        // - subjective（旧）も送る（= before）
+        // - subjective_before（新）も送る（= before）
+        // - subjective_after（新）も送る（= after）※入力があるときのみ
         const saveResponse = await fetch(`${API_BASE}/api/save-visit`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -118,15 +202,13 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
               sdnn: customerData.afterSDNN,
               heart_rate: customerData.afterHeartRate,
             },
-            subjective: {
-              sleepQuality: customerData.sleepQuality,
-              stress: customerData.stress,
-              bodyHeaviness: customerData.bodyHeaviness,
-              bedtime: customerData.bedtime,
-              alcohol: customerData.alcohol,
-              caffeine: customerData.caffeine,
-              exercise: customerData.exercise,
-            },
+
+            // 旧（before）
+            subjective: subjectiveBefore,
+
+            // 新（before/after）
+            subjective_before: subjectiveBefore,
+            subjective_after: subjectiveAfter,
           }),
         });
 
@@ -154,15 +236,18 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
           body: JSON.stringify({
             customer_id: saveData.customer_id,
             visit_id: saveData.visit_id,
-            fallbackCustomerData: customerData,
+            fallbackCustomerData: customerData, // after主観も含む想定
           }),
         });
 
         if (!reportResponse.ok) throw new Error('AIレポートの生成に失敗しました');
 
         const reportData = await reportResponse.json();
-        setAiReport(reportData.report ?? '');
-        setNextAction(reportData.next_action ?? '');
+        setAiReport((reportData.report ?? '').trim());
+
+        // ✅ next_action が空のときでもUIが崩れないよう保険
+        const na = String(reportData.next_action ?? '').trim();
+        setNextAction(na);
 
         // キャッシュ保存
         try {
@@ -172,8 +257,8 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
               fingerprint,
               customer_id: saveData.customer_id,
               visit_id: saveData.visit_id,
-              report: reportData.report ?? '',
-              next_action: reportData.next_action ?? '',
+              report: (reportData.report ?? '').trim(),
+              next_action: na,
             })
           );
         } catch {
@@ -188,18 +273,26 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
     };
 
     saveAndGenerate();
-  }, [API_BASE, customerData]);
+  }, [API_BASE, customerData, fingerprint, hasSubjectiveAfter, afterSleepQuality, afterStress, afterBodyHeaviness]);
 
   const improvementRate =
     customerData.beforeRMSSD > 0
       ? Math.round(((customerData.afterRMSSD - customerData.beforeRMSSD) / customerData.beforeRMSSD) * 100)
       : 0;
 
+  // ✅ 施術後主観が未入力の場合は「施術前と同じ値」で表示（変な見た目を防ぐ）
+  const chartSleepAfter =
+    afterSleepQuality != null ? afterSleepQuality : isFiniteNumber(customerData.sleepQuality) ? customerData.sleepQuality : 0;
+  const chartStressAfter =
+    afterStress != null ? afterStress : isFiniteNumber(customerData.stress) ? customerData.stress : 0;
+  const chartBodyAfter =
+    afterBodyHeaviness != null ? afterBodyHeaviness : isFiniteNumber(customerData.bodyHeaviness) ? customerData.bodyHeaviness : 0;
+
   const comparisonData = [
     { category: 'RMSSD', before: customerData.beforeRMSSD || 0, after: customerData.afterRMSSD || 0 },
-    { category: '睡眠', before: customerData.sleepQuality, after: Math.min(10, customerData.sleepQuality + 1) },
-    { category: 'ストレス', before: customerData.stress, after: Math.max(0, customerData.stress - 2) },
-    { category: '頭皮', before: customerData.bodyHeaviness, after: Math.max(0, customerData.bodyHeaviness - 3) },
+    { category: '睡眠', before: customerData.sleepQuality ?? 0, after: chartSleepAfter ?? 0 },
+    { category: 'ストレス', before: customerData.stress ?? 0, after: chartStressAfter ?? 0 },
+    { category: '重だるさ', before: customerData.bodyHeaviness ?? 0, after: chartBodyAfter ?? 0 },
   ];
 
   const handleSaveDiagnosis = async () => {
@@ -252,6 +345,14 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
       setIsSavingDiagnosis(false);
     }
   };
+
+  // ✅ next_action 表示用（空でも枠が消えない）
+  const nextActionDisplay = useMemo(() => {
+    if (isLoading) return '生成中…';
+    if (error) return '生成に失敗しました（再読み込みして下さい）';
+    if (nextAction && nextAction.trim()) return nextAction.trim();
+    return '（次回までの1アクションを生成できませんでした）';
+  }, [isLoading, error, nextAction]);
 
   return (
     <div className="h-full p-8 overflow-y-auto">
@@ -330,9 +431,7 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
         {/* 前回の診断内容（保存済みのものがあれば表示） */}
         {previousVisit?.ai_report && (
           <details className="bg-white rounded-2xl shadow-lg p-6 mb-6">
-            <summary className="cursor-pointer text-sm text-gray-700">
-              前回の診断内容を見る
-            </summary>
+            <summary className="cursor-pointer text-sm text-gray-700">前回の診断内容を見る</summary>
             <div className="mt-4 text-gray-700 whitespace-pre-wrap text-sm leading-relaxed">
               {previousVisit.ai_report}
             </div>
@@ -363,19 +462,24 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
           </div>
         </div>
 
-        {/* Next Action */}
-        {nextAction && (
-          <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl shadow-lg p-8 mb-6 border-2 border-green-200">
-            <h3 className="text-gray-800 mb-6 flex items-center gap-2">
-              <Lightbulb className="w-6 h-6 text-amber-500" />
-              次回までの1アクション
-            </h3>
+        {/* ✅ Next Action（空でも枠が消えない） */}
+        <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl shadow-lg p-8 mb-6 border-2 border-green-200">
+          <h3 className="text-gray-800 mb-6 flex items-center gap-2">
+            <Lightbulb className="w-6 h-6 text-amber-500" />
+            次回までの1アクション
+          </h3>
 
-            <div className="bg-white rounded-xl p-6">
-              <p className="text-xl text-green-800">{nextAction}</p>
-            </div>
+          <div className="bg-white rounded-xl p-6">
+            <p className="text-xl text-green-800">{nextActionDisplay}</p>
           </div>
-        )}
+
+          {/* next_actionが未生成/エラーのときは、保存ボタンを押しても意味が薄いので補助文 */}
+          {!isLoading && !error && (!nextAction || !nextAction.trim()) && (
+            <p className="text-xs text-gray-500 mt-3">
+              ※次回までの1アクションが空のため、レポート生成設定をご確認ください。
+            </p>
+          )}
+        </div>
 
         {/* ✅ Action Buttons */}
         <div className="space-y-3">
