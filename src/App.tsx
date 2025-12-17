@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { HomeScreen } from './components/HomeScreen';
 import { HRVMeasurementScreen } from './components/HRVMeasurementScreen';
 import { CounselingScreen } from './components/CounselingScreen';
 import { AIReportScreen } from './components/AIReportScreen';
 import { AfterConditionScreen } from './components/AfterConditionScreen';
+import { CustomerReportView } from './components/CustomerReportView';
 
 export type Screen =
   | 'home'
@@ -46,6 +47,22 @@ export interface CustomerData {
 }
 
 export default function App() {
+  // 共有モードのチェック（?share=visitId）
+  const [shareVisitId, setShareVisitId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shareId = params.get('share');
+    if (shareId) {
+      setShareVisitId(shareId);
+    }
+  }, []);
+
+  // 共有モードの場合はお客様用ページを表示
+  if (shareVisitId) {
+    return <CustomerReportView visitId={shareVisitId} />;
+  }
+
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
   // 画面遷移の「戻る」を実現するための履歴
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
