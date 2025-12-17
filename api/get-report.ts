@@ -42,19 +42,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Visit not found' });
     }
 
-    // HRV測定データを取得
+    // HRV測定データを取得（phaseカラムを使用）
     const { data: measurements } = await supabase
       .from('hrv_measurements')
-      .select('timing, rmssd, sdnn, heart_rate')
+      .select('phase, rmssd, sdnn, heart_rate')
       .eq('visit_id', visit_id);
 
-    const before = measurements?.find((m) => m.timing === 'before');
-    const after = measurements?.find((m) => m.timing === 'after');
+    const before = measurements?.find((m) => m.phase === 'before');
+    const after = measurements?.find((m) => m.phase === 'after');
 
-    // 診断データを取得
-    const { data: diagnosis } = await supabase
-      .from('diagnoses')
-      .select('report_text, next_action')
+    // 診断データを取得（ai_reportsテーブルを使用）
+    const { data: aiReport } = await supabase
+      .from('ai_reports')
+      .select('report_text, model')
       .eq('visit_id', visit_id)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -69,6 +69,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 顧客名を取得（JOINの結果から）
     const customerName = (visit.customers as any)?.full_name || '顧客';
 
+    // report_textから「次回までの1アクション」を抽出（統合されている場合）
+    let reportText = aiReport?.report_text || null;
+    let nextAction: string | null = null;
+
+    if (reportText) {
+      const actionMatch = reportText.match(/次回までの1アクション[：:]\s*(.+?)(?:\n|$)/);
+      if (actionMatch) {
+        nextAction = actionMatch[1].trim();
+      }
+    }
+
     return res.status(200).json({
       visit_id: visit.id,
       visit_date: visit.visit_date,
@@ -77,8 +88,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       before_rmssd: before?.rmssd || null,
       after_rmssd: after?.rmssd || null,
       improvement_rate: improvementRate,
-      report_text: diagnosis?.report_text || null,
-      next_action: diagnosis?.next_action || null,
+      report_text: reportText,
+      next_action: nextAction,
     });
   } catch (err) {
     console.error('get-report error:', err);
