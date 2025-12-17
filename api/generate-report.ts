@@ -1,3 +1,4 @@
+
 // api/generate-report.ts
 import OpenAI from 'openai';
 import { supabaseAdmin } from './_supabase';
