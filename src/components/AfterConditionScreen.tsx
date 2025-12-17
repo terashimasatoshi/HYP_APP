@@ -1,5 +1,3 @@
-
-
 // src/components/AfterConditionScreen.tsx
 import { useEffect } from 'react';
 import { CustomerData } from '../App';
