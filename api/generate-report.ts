@@ -2,7 +2,7 @@
 // api/generate-report.ts
 import OpenAI from 'openai';
 import { supabaseAdmin } from './_supabase';
-import { HRV_KNOWLEDGE, SELFCARE_KNOWLEDGE, NEXT_ACTION_EXAMPLES } from './_knowledge';
+import { HRV_KNOWLEDGE, SELFCARE_KNOWLEDGE, NEXT_ACTION_EXAMPLES, SELFCARE_EXAMPLES } from './_knowledge';
 
 export const runtime = 'nodejs';
 
