@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Header } from './components/Header';
 import { HomeScreen } from './components/HomeScreen';
 import { HRVMeasurementScreen } from './components/HRVMeasurementScreen';
@@ -30,12 +30,10 @@ export interface CustomerData {
   afterSDNN: number;
   afterHeartRate: number;
 
-  // 施術前の主観（既存）
   sleepQuality: number;
   stress: number;
   bodyHeaviness: number;
 
-  // ✅ 施術後の主観（追加）
   afterSleepQuality: number;
   afterStress: number;
   afterBodyHeaviness: number;
@@ -46,31 +44,18 @@ export interface CustomerData {
   exercise: boolean;
 }
 
-export default function App() {
-  // 共有モードのチェック（?share=visitId）
-  const [shareVisitId, setShareVisitId] = useState<string | null>(null);
+// ✅ 共有モードのvisitIdを取得（コンポーネント外で即座に判定）
+function getShareVisitId(): string | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  return params.get('share');
+}
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const shareId = params.get('share');
-    if (shareId) {
-      setShareVisitId(shareId);
-    }
-  }, []);
-
-  // 共有モードの場合はお客様用ページを表示
-  if (shareVisitId) {
-    return <CustomerReportView visitId={shareVisitId} />;
-  }
-
+// ✅ メインアプリ（スタッフ用）を別コンポーネントに分離
+function MainApp() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
-  // 画面遷移の「戻る」を実現するための履歴
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
-
-  // ホーム画面の初期表示モード（既存検索 or 新規登録）
   const [homeMode, setHomeMode] = useState<'search' | 'new'>('search');
-
-  // ホーム画面内のローカル状態（選択中顧客など）をリセットするためのトークン
   const [homeResetCounter, setHomeResetCounter] = useState(0);
 
   const [customerData, setCustomerData] = useState<CustomerData>({
@@ -92,7 +77,6 @@ export default function App() {
     stress: 5,
     bodyHeaviness: 5,
 
-    // ✅ 追加（施術後体感の初期値）
     afterSleepQuality: 5,
     afterStress: 5,
     afterBodyHeaviness: 5,
@@ -114,7 +98,7 @@ export default function App() {
       customerId: undefined,
       visitCount: 'first',
       menu: '',
-      staff: customerData.staff, // 担当者だけ維持
+      staff: customerData.staff,
 
       beforeRMSSD: 0,
       beforeSDNN: 0,
@@ -128,7 +112,6 @@ export default function App() {
       stress: 5,
       bodyHeaviness: 5,
 
-      // ✅ 追加：施術後体感もリセット
       afterSleepQuality: 5,
       afterStress: 5,
       afterBodyHeaviness: 5,
@@ -163,7 +146,6 @@ export default function App() {
       if (!ok) return;
     }
 
-    // レポートの簡易キャッシュをクリア（別セッションへの誤適用防止）
     try {
       sessionStorage.removeItem('hyp:reportCache:v1');
     } catch {
@@ -224,12 +206,10 @@ export default function App() {
             type="after"
             customerData={customerData}
             updateCustomerData={updateCustomerData}
-            // ✅ ここで report ではなく after-condition へ
             onNext={() => navigate('after-condition')}
           />
         )}
 
-        {/* ✅ 追加：施術後体感入力 */}
         {currentScreen === 'after-condition' && (
           <AfterConditionScreen
             customerData={customerData}
@@ -248,4 +228,17 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+// ✅ デフォルトエクスポート - 共有モードかどうかで分岐
+export default function App() {
+  const shareVisitId = getShareVisitId();
+  
+  // 共有モードならお客様用ページを表示
+  if (shareVisitId) {
+    return <CustomerReportView visitId={shareVisitId} />;
+  }
+  
+  // 通常モードならメインアプリを表示
+  return <MainApp />;
 }
