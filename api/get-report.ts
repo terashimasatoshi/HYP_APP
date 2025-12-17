@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { supabase } from './_supabase';
+import { supabaseAdmin as supabase } from './_supabase';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORSヘッダー
