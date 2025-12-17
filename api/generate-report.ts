@@ -1,6 +1,7 @@
 // api/generate-report.ts
 import OpenAI from 'openai';
 import { supabaseAdmin } from './_supabase';
+import { HRV_KNOWLEDGE, SELFCARE_KNOWLEDGE, NEXT_ACTION_EXAMPLES } from './_knowledge';
 
 export const runtime = 'nodejs';
 
@@ -129,21 +130,24 @@ function buildFallbackNextAction(input: any): string {
   const alcohol = sb.alcohol === true;
   const caffeine = sb.caffeine === true;
 
-  if (stressA != null && stressA >= 6) return '次回まで：4秒吸って6秒吐く呼吸を3分×2回（毎日）';
-  if (stressB != null && stressB >= 6) return '次回まで：4秒吸って6秒吐く呼吸を3分×2回（毎日）';
+  // ナレッジベースからランダムに選択
+  const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
+
+  if (stressA != null && stressA >= 6) return pick(SELFCARE_EXAMPLES.highStress);
+  if (stressB != null && stressB >= 6) return pick(SELFCARE_EXAMPLES.highStress);
 
   if ((sleepB != null && sleepB <= 4) || (sleepA != null && sleepA <= 4)) {
-    return '次回まで：就寝前にスマホを置き、呼吸瞑想5分（毎晩）';
+    return pick(SELFCARE_EXAMPLES.poorSleep);
   }
 
   if ((heavyA != null && heavyA >= 6) || (heavyB != null && heavyB >= 6)) {
-    return '次回まで：頭皮を指の腹で1分＋首回し1分（毎晩）';
+    return pick(SELFCARE_EXAMPLES.bodyHeaviness);
   }
 
-  if (caffeine) return '次回まで：14時以降はカフェインを控える（まず7日間）';
-  if (alcohol) return '次回まで：就寝前に白湯200ml＋首肩ストレッチ2分（毎晩）';
+  if (caffeine) return pick(SELFCARE_EXAMPLES.caffeine);
+  if (alcohol) return pick(SELFCARE_EXAMPLES.alcohol);
 
-  return '次回まで：首肩ストレッチ2分＋深呼吸2分（毎晩）';
+  return pick(SELFCARE_EXAMPLES.general);
 }
 
 function validateNextAction(text: string): boolean {
@@ -367,33 +371,60 @@ export default {
     };
 
     const system = `
-あなたはリラクゼーションサロンのスタッフとして、お客様に渡す「施術後レポート」を作成します（日本語・丁寧語）。
-医療的な診断・治療効果の断定は禁止。「傾向」「〜かもしれません」を用います。
+【参考ナレッジ：自律神経・HRV】
+${HRV_KNOWLEDGE}
 
-【必須ルール】
-- reportは“必ず”複数行（改行あり）で、目安350〜700文字
+【参考ナレッジ：セルフケア方法】
+${SELFCARE_KNOWLEDGE}
+
+【参考ナレッジ：次回アクション例】
+${NEXT_ACTION_EXAMPLES}
+
+---
+
+あなたはリラクゼーションサロン「森の日々」のスタッフとして、お客様に渡す「施術後レポート」を作成します（日本語・丁寧語）。
+医療的な診断・治療効果の断定は禁止。「傾向」「〜と考えられます」「〜かもしれません」を用います。
+
+【自律神経とRMSSDの基礎知識（レポート作成時の参考）】
+- RMSSD（心拍変動）は「副交感神経（リラックスモード）」の活動を反映する指標です
+- 副交感神経が優位になると：心身がリラックス→睡眠の質向上→疲労回復が促進されます
+- ヘッドスパ施術は頭皮の血流改善・筋肉の緊張緩和を通じて、副交感神経を活性化させます
+- RMSSD上昇＝副交感神経が活性化＝リラックスモードへ移行したサイン
+- RMSSD低下でも、施術直後は身体が調整中の場合があり、必ずしも悪い兆候ではありません
+- SDNNは自律神経全体（交感神経＋副交感神経）の活動量を示します
+- 心拍数の低下も副交感神経優位（リラックス状態）を示唆します
+
+【レポート作成の必須ルール】
+- reportは"必ず"複数行（改行あり）で、目安400〜800文字
+- 自律神経・副交感神経の観点からRMSSDの変化を解説する（お客様にわかりやすく）
 - 数値を2つ以上引用（RMSSD/SDNN/心拍/主観スコアから2つ以上）
 - 「施術前→施術後の主観（sleep_quality/stress/body_heaviness）」に必ず触れ、差分も1つ以上言及する
   ※sleep_qualityは高いほど良い / stress・body_heavinessは低いほど良い
 - bedtime/alcohol/caffeine/exercise は、入力があるものだけ触れる（無いなら無理に書かない）
 - セルフケアは最大2つ。必ず「時間 or 回数」を入れる（抽象は禁止）
+- セルフケアも「副交感神経を活性化させる」観点で提案する（深呼吸、ストレッチ、瞑想など）
+
+【RMSSDの変化に応じた解説例】
+- RMSSD上昇時：「副交感神経が活性化し、リラックスモードへ移行しました。睡眠の質向上や疲労回復が期待できます」
+- RMSSD維持時：「自律神経のバランスが安定しています。継続的なケアで更なる改善が見込めます」
+- RMSSD低下時：「施術直後は身体が調整中の可能性があります。今夜ゆっくり休むことで、副交感神経の回復が促されます」
 
 【次回来店の目安（重要）】
-- report内の「【次回来店の目安】」は必ず
-  「3〜6週間後（約1ヶ月〜1ヶ月半）」の範囲で提案する
-- 1週間後/2週間後 など “3週間未満” の提案は禁止
+- report内の「【次回来店の目安】」は必ず「3〜6週間後（約1ヶ月〜1ヶ月半）」の範囲で提案する
+- 1週間後/2週間後 など "3週間未満" の提案は禁止
 
 【next_action（最重要）】
 - next_action は「自宅でできるセルフケア」1つだけ
-- 内容は瞑想/呼吸/ストレッチ/頭皮マッサージ/首肩ほぐし等の“自宅で完結する行動”
+- 内容は深呼吸/瞑想/ストレッチ/頭皮マッサージ/首肩ほぐし等の"自宅で完結する行動"
+- 「副交感神経を活性化させる」観点で選ぶ
 - 来店/施術/予約/サロン/クリニック等の単語を含めるのは禁止
 - 40〜70文字で、時間/回数を必ず入れる（抽象は禁止）
 
 【reportフォーマット（この見出しを使う）】
 【本日のまとめ】
-【数値の変化】
+【数値の変化】←自律神経の観点から解説
 【主観・生活背景】
-【セルフケア（次回まで）】
+【セルフケア（次回まで）】←副交感神経を高める行動を提案
 【次回来店の目安】
 `;
 
@@ -401,14 +432,20 @@ export default {
 次のDATAだけを根拠に、上のルールに従ってJSONで出力してください。
 JSONは必ず { "report": "...", "next_action": "..." } の2キーのみ。
 
+【重要】レポートでは以下を意識してください：
+1. RMSSDの変化を「副交感神経の活性化」の観点から解説する
+2. 副交感神経が優位になるとリラックス・睡眠改善・疲労回復に繋がることを伝える
+3. ヘッドスパがどのように自律神経バランスに作用したかをわかりやすく説明する
+4. セルフケアは「副交感神経を高める行動」として提案する
+
 DATA:
 ${JSON.stringify(input, null, 2)}
 
 補助：数値の見せ方例
-- RMSSD: ${fmtDelta(todayBefore.rmssd, todayAfter.rmssd)}
-- SDNN: ${fmtDelta(todayBefore.sdnn, todayAfter.sdnn)}
-- 心拍: ${fmtDelta(todayBefore.heart_rate, todayAfter.heart_rate)}
-- 主観(睡眠): ${fmtDelta(subjBefore.sleep_quality, subjAfter.sleep_quality)}
+- RMSSD（副交感神経指標）: ${fmtDelta(todayBefore.rmssd, todayAfter.rmssd)}
+- SDNN（自律神経全体の活動量）: ${fmtDelta(todayBefore.sdnn, todayAfter.sdnn)}
+- 心拍数: ${fmtDelta(todayBefore.heart_rate, todayAfter.heart_rate)}
+- 主観(睡眠の質): ${fmtDelta(subjBefore.sleep_quality, subjAfter.sleep_quality)}
 - 主観(ストレス): ${fmtDelta(subjBefore.stress, subjAfter.stress)}
 - 主観(重だるさ): ${fmtDelta(subjBefore.body_heaviness, subjAfter.body_heaviness)}
 `;
