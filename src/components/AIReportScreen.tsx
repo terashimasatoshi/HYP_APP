@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CustomerData } from '../App';
-import { TrendingUp, Sparkles, Lightbulb, Home, Save } from 'lucide-react';
+import { TrendingUp, Sparkles, Lightbulb, Home, Save, Share2, X } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { ImprovementChart } from './ImprovementChart';
+import { QRCodeSVG } from 'qrcode.react';
 
 type CustomerDataWithAfterSubjective = CustomerData & {
   // ✅ 施術後体感（AfterConditionScreen）で入れる3スライダー想定
@@ -45,6 +46,7 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
   const [isSavingDiagnosis, setIsSavingDiagnosis] = useState(false);
   const [isDiagnosisSaved, setIsDiagnosisSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showQRModal, setShowQRModal] = useState(false);
 
   const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -498,6 +500,20 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
 
           {saveError && <p className="text-sm text-red-500">{saveError}</p>}
 
+          {/* ✅ QRコード共有ボタン */}
+          <button
+            onClick={() => setShowQRModal(true)}
+            disabled={!isDiagnosisSaved || !visitId}
+            className={`w-full py-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 ${
+              !isDiagnosisSaved || !visitId
+                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                : 'bg-white border-2 border-purple-300 text-purple-700 hover:bg-purple-50'
+            }`}
+          >
+            <Share2 className="w-5 h-5" />
+            お客様に共有（QRコード）
+          </button>
+
           <button
             onClick={onHome}
             className="w-full py-4 bg-gradient-to-r from-green-400 to-emerald-500 text-white rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
@@ -507,6 +523,41 @@ export function AIReportScreen({ customerData, onHome }: AIReportScreenProps) {
           </button>
         </div>
       </div>
+
+      {/* ✅ QRコードモーダル */}
+      {showQRModal && visitId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full relative">
+            <button
+              onClick={() => setShowQRModal(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            
+            <h3 className="text-xl text-gray-800 text-center mb-2">お客様用レポート</h3>
+            <p className="text-sm text-gray-500 text-center mb-6">
+              QRコードをスキャンしていただくと
+              <br />
+              スマートフォンでご確認いただけます
+            </p>
+            
+            <div className="flex justify-center mb-6">
+              <div className="p-4 bg-white border-2 border-gray-100 rounded-xl">
+                <QRCodeSVG
+                  value={`${window.location.origin}?share=${visitId}`}
+                  size={200}
+                  level="M"
+                />
+              </div>
+            </div>
+            
+            <p className="text-xs text-gray-400 text-center">
+              {customerData.name}様 - {new Date().toLocaleDateString('ja-JP')}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
