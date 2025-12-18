@@ -180,26 +180,18 @@ function reportHasRequiredHeadings(report: string): boolean {
   return required.every((h) => report.includes(h));
 }
 
-function reportHasNextVisitRange(report: string): boolean {
-  return /(3\s*[〜\-~]\s*6\s*週間)|(約?\s*1\s*ヶ?月\s*[〜\-~]\s*1\s*ヶ?月半)/.test(report);
-}
-
 async function createCompletion(messages: any[], opts?: { max_tokens?: number }) {
   try {
-    return await client.chat.completions.create({
-      model: MODEL,
-      messages,
-      response_format: { type: 'json_object' } as any,
-      temperature: 0.7,
-      max_tokens: opts?.max_tokens ?? 900,
-    });
-  } catch {
-    return await client.chat.completions.create({
+    const response = await client.chat.completions.create({
       model: MODEL,
       messages,
       temperature: 0.7,
-      max_tokens: opts?.max_tokens ?? 900,
+      max_tokens: opts?.max_tokens ?? 4000,
     });
+    return response;
+  } catch (error) {
+    console.error('Completion error:', error);
+    throw error;
   }
 }
 
