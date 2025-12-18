@@ -6,6 +6,7 @@ import { CounselingScreen } from './components/CounselingScreen';
 import { AIReportScreen } from './components/AIReportScreen';
 import { AfterConditionScreen } from './components/AfterConditionScreen';
 import { CustomerReportView } from './components/CustomerReportView';
+import { LoginScreen } from './components/LoginScreen';
 
 export type Screen =
   | 'home'
@@ -230,15 +231,27 @@ function MainApp() {
   );
 }
 
+// ✅ 認証状態を確認
+function isAuthenticated(): boolean {
+  if (typeof window === 'undefined') return false;
+  return sessionStorage.getItem('hyp:authenticated') === 'true';
+}
+
 // ✅ デフォルトエクスポート - 共有モードかどうかで分岐
 export default function App() {
+  const [authenticated, setAuthenticated] = useState(isAuthenticated);
   const shareVisitId = getShareVisitId();
   
-  // 共有モードならお客様用ページを表示
+  // 共有モードならお客様用ページを表示（ログイン不要）
   if (shareVisitId) {
     return <CustomerReportView visitId={shareVisitId} />;
   }
   
-  // 通常モードならメインアプリを表示
+  // 未認証ならログイン画面を表示
+  if (!authenticated) {
+    return <LoginScreen onLogin={() => setAuthenticated(true)} />;
+  }
+  
+  // 認証済みならメインアプリを表示
   return <MainApp />;
 }
