@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 
 const client = new OpenAI({
   apiKey: process.env.GEMINI_API_KEY,
-  baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/'
+  baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
 });
 const MODEL = 'gemini-2.5-flash';
 
@@ -107,12 +107,8 @@ function normalizeVisit(v: any): NormalizedVisit | null {
     created_at: v.created_at ?? null, // ✅
     menu: v.menu ?? null,
     staff: v.staff ?? null,
-    before: before
-      ? { rmssd: num(before.rmssd), sdnn: num(before.sdnn), heart_rate: num(before.heart_rate) }
-      : null,
-    after: after
-      ? { rmssd: num(after.rmssd), sdnn: num(after.sdnn), heart_rate: num(after.heart_rate) }
-      : null,
+    before: before ? { rmssd: num(before.rmssd), sdnn: num(before.sdnn), heart_rate: num(before.heart_rate) } : null,
+    after: after ? { rmssd: num(after.rmssd), sdnn: num(after.sdnn), heart_rate: num(after.heart_rate) } : null,
     subjective_before: toSubj(subjBeforeRow),
     subjective_after: toSubj(subjAfterRow),
   };
@@ -133,7 +129,6 @@ function buildFallbackNextAction(input: any): string {
   const alcohol = sb.alcohol === true;
   const caffeine = sb.caffeine === true;
 
-  // ナレッジベースからランダムに選択
   const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
 
   if (stressA != null && stressA >= 6) return pick(SELFCARE_EXAMPLES.highStress);
@@ -169,13 +164,7 @@ function validateNextAction(text: string): boolean {
 }
 
 function reportHasRequiredHeadings(report: string): boolean {
-  const required = [
-    '【本日のまとめ】',
-    '【数値の変化】',
-    '【主観・生活背景】',
-    '【セルフケア（次回まで）】',
-    '【次回来店の目安】',
-  ];
+  const required = ['【本日のまとめ】', '【数値の変化】', '【主観・生活背景】', '【セルフケア（次回まで）】', '【次回来店の目安】'];
   return required.every((h) => report.includes(h));
 }
 
@@ -184,17 +173,63 @@ function reportHasNextVisitRange(report: string): boolean {
 }
 
 async function createCompletion(messages: any[], opts?: { max_tokens?: number }) {
+  const response = await client.chat.completions.create({
+    model: MODEL,
+    messages,
+    temperature: 0.7,
+    max_tokens: opts?.max_tokens ?? 4000,
+  });
+  return response;
+}
+
+/** ✅ tags で確実に抽出 */
+function extractTag(text: string, tag: 'report' | 'next_action'): string {
+  if (!text) return '';
+  const re = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
+  const m = text.match(re);
+  return (m?.[1] ?? '').trim();
+}
+
+/** ✅ report本文に混入したコード/JSONっぽい塊を最低限落とす（保険） */
+function sanitizeReport(report: string): string {
+  if (!report) return '';
+  let r = report;
+
+  // fenced code block を除去
+  r = r.replace(/```[\s\S]*?```/g, '').trim();
+
+  // “露骨なJSONオブジェクト” が末尾に付くケースを削る（よくある事故）
+  // ※ 文章中の軽い括弧は残すため、行頭から始まる { ... } ブロックに限定
+  r = r.replace(/^\s*\{[\s\S]*\}\s*$/m, '').trim();
+
+  // 連続空行を圧縮
+  r = r.replace(/\n{3,}/g, '\n\n').trim();
+
+  return r;
+}
+
+/** ✅ JSON救済（タグがない時の最後の手段） */
+function tryParseJson(content: string): { report: string; next_action: string } | null {
+  if (!content) return null;
   try {
-    const response = await client.chat.completions.create({
-      model: MODEL,
-      messages,
-      temperature: 0.7,
-      max_tokens: opts?.max_tokens ?? 4000,
-    });
-    return response;
-  } catch (error) {
-    console.error('Completion error:', error);
-    throw error;
+    const parsed = JSON.parse(content);
+    return {
+      report: typeof parsed.report === 'string' ? parsed.report.trim() : '',
+      next_action: typeof parsed.next_action === 'string' ? parsed.next_action.trim() : '',
+    };
+  } catch {
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/\{[\s\S]*\}/);
+    const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : '';
+    if (!jsonStr) return null;
+    try {
+      const parsed = JSON.parse(jsonStr);
+      return {
+        report: typeof parsed.report === 'string' ? parsed.report.trim() : '',
+        next_action: typeof parsed.next_action === 'string' ? parsed.next_action.trim() : '',
+      };
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -224,7 +259,6 @@ async function fetchLatestTwoByCustomer(customerId: string) {
  * ✅ 「このvisitの直前」を取得（visit_id指定時にズレない）
  */
 async function fetchPrevOfCurrent(customerId: string, current: NormalizedVisit) {
-  // created_at が取れている前提（無い場合はDBに列を追加してください）
   const curCreatedAt = current.created_at;
   if (!curCreatedAt) return null;
 
@@ -238,8 +272,8 @@ async function fetchPrevOfCurrent(customerId: string, current: NormalizedVisit) 
     `
     )
     .eq('customer_id', customerId)
-    .lt('created_at', curCreatedAt) // ✅ currentより前
-    .order('created_at', { ascending: false }) // ✅ 直前を取る
+    .lt('created_at', curCreatedAt)
+    .order('created_at', { ascending: false })
     .limit(1);
 
   if (error) throw error;
@@ -260,7 +294,6 @@ export default {
     let previous: NormalizedVisit | null = null;
 
     try {
-      // ✅ visit_id がある場合：currentを固定し、「その直前」をpreviousにする
       if (visitId) {
         const { data, error } = await supabaseAdmin
           .from('visits')
@@ -284,7 +317,6 @@ export default {
           previous = normalizeVisit(prevRow);
         }
       } else {
-        // ✅ visit_id が無い場合：最新2件をそのまま current/previous
         if (customerId) {
           const rows = await fetchLatestTwoByCustomer(customerId);
           current = normalizeVisit(rows[0]);
@@ -293,13 +325,10 @@ export default {
       }
     } catch (e: any) {
       console.error('visit load error:', e?.message ?? e);
-      // ここで落ちても fallbackCustomerData で生成は続ける
     }
 
-    // fallback（フロントから来る場合に備える）
     const cd = body.fallbackCustomerData ?? {};
 
-    // HRV（today）
     const todayBefore = {
       rmssd: current?.before?.rmssd ?? num2(cd.beforeRMSSD),
       sdnn: current?.before?.sdnn ?? num2(cd.beforeSDNN),
@@ -311,7 +340,6 @@ export default {
       heart_rate: current?.after?.heart_rate ?? num2(cd.afterHeartRate),
     };
 
-    // subjective_before（施術前：生活も含む）
     const subjBefore: Subj = {
       sleep_quality: current?.subjective_before?.sleep_quality ?? num2(cd.sleepQuality),
       stress: current?.subjective_before?.stress ?? num2(cd.stress),
@@ -322,15 +350,12 @@ export default {
       exercise: current?.subjective_before?.exercise ?? boolOrNull(cd.exercise),
     };
 
-    // subjective_after（施術後：3スライダー想定）
     const subjAfter: Subj = {
       sleep_quality:
-        current?.subjective_after?.sleep_quality ??
-        num2(cd.afterSleepQuality ?? cd.after_sleep_quality ?? null),
+        current?.subjective_after?.sleep_quality ?? num2(cd.afterSleepQuality ?? cd.after_sleep_quality ?? null),
       stress: current?.subjective_after?.stress ?? num2(cd.afterStress ?? cd.after_stress ?? null),
       body_heaviness:
-        current?.subjective_after?.body_heaviness ??
-        num2(cd.afterBodyHeaviness ?? cd.after_body_heaviness ?? null),
+        current?.subjective_after?.body_heaviness ?? num2(cd.afterBodyHeaviness ?? cd.after_body_heaviness ?? null),
     };
 
     const input = {
@@ -384,17 +409,8 @@ ${NEXT_ACTION_EXAMPLES}
 あなたはリラクゼーションサロン「森の日々」のスタッフとして、お客様に渡す「施術後レポート」を作成します（日本語・丁寧語）。
 医療的な診断・治療効果の断定は禁止。「傾向」「〜と考えられます」「〜かもしれません」を用います。
 
-【自律神経とRMSSDの基礎知識（レポート作成時の参考）】
-- RMSSD（心拍変動）は「副交感神経（リラックスモード）」の活動を反映する指標です
-- 副交感神経が優位になると：心身がリラックス→睡眠の質向上→疲労回復が促進されます
-- ヘッドスパ施術は頭皮の血流改善・筋肉の緊張緩和を通じて、副交感神経を活性化させます
-- RMSSD上昇＝副交感神経が活性化＝リラックスモードへ移行したサイン
-- RMSSD低下でも、施術直後は身体が調整中の場合があり、必ずしも悪い兆候ではありません
-- SDNNは自律神経全体（交感神経＋副交感神経）の活動量を示します
-- 心拍数の低下も副交感神経優位（リラックス状態）を示唆します
-
 【レポート作成の必須ルール】
-- reportは"必ず"複数行（改行あり）で、目安400〜800文字
+- reportは必ず複数行（改行あり）で、目安400〜800文字
 - 自律神経・副交感神経の観点からRMSSDの変化を解説する（お客様にわかりやすく）
 - 数値を2つ以上引用（RMSSD/SDNN/心拍/主観スコアから2つ以上）
 - 「施術前→施術後の主観（sleep_quality/stress/body_heaviness）」に必ず触れ、差分も1つ以上言及する
@@ -402,11 +418,7 @@ ${NEXT_ACTION_EXAMPLES}
 - bedtime/alcohol/caffeine/exercise は、入力があるものだけ触れる（無いなら無理に書かない）
 - セルフケアは最大2つ。必ず「時間 or 回数」を入れる（抽象は禁止）
 - セルフケアも「副交感神経を活性化させる」観点で提案する（深呼吸、ストレッチ、瞑想など）
-
-【RMSSDの変化に応じた解説例】
-- RMSSD上昇時：「副交感神経が活性化し、リラックスモードへ移行しました。睡眠の質向上や疲労回復が期待できます」
-- RMSSD維持時：「自律神経のバランスが安定しています。継続的なケアで更なる改善が見込めます」
-- RMSSD低下時：「施術直後は身体が調整中の可能性があります。今夜ゆっくり休むことで、副交感神経の回復が促されます」
+- report本文にJSON/コード/```/波括弧の羅列を含めない（DATAを貼らない）
 
 【次回来店の目安（重要）】
 - report内の「【次回来店の目安】」は必ず「3〜6週間後（約1ヶ月〜1ヶ月半）」の範囲で提案する
@@ -414,28 +426,25 @@ ${NEXT_ACTION_EXAMPLES}
 
 【next_action（最重要）】
 - next_action は「自宅でできるセルフケア」1つだけ
-- 内容は深呼吸/瞑想/ストレッチ/頭皮マッサージ/首肩ほぐし等の"自宅で完結する行動"
-- 「副交感神経を活性化させる」観点で選ぶ
 - 来店/施術/予約/サロン/クリニック等の単語を含めるのは禁止
 - 40〜70文字で、時間/回数を必ず入れる（抽象は禁止）
 
+【出力形式（超重要）】
+- 出力は必ず次の2つのタグだけ。余計な文章は禁止。
+<report>...ここにレポート本文...</report>
+<next_action>...ここに次回アクション...</next_action>
+
 【reportフォーマット（この見出しを使う）】
 【本日のまとめ】
-【数値の変化】←自律神経の観点から解説
+【数値の変化】
 【主観・生活背景】
-【セルフケア（次回まで）】←副交感神経を高める行動を提案
+【セルフケア（次回まで）】
 【次回来店の目安】
 `;
 
     const user = `
-次のDATAだけを根拠に、上のルールに従ってJSONで出力してください。
-JSONは必ず { "report": "...", "next_action": "..." } の2キーのみ。
-
-【重要】レポートでは以下を意識してください：
-1. RMSSDの変化を「副交感神経の活性化」の観点から解説する
-2. 副交感神経が優位になるとリラックス・睡眠改善・疲労回復に繋がることを伝える
-3. ヘッドスパがどのように自律神経バランスに作用したかをわかりやすく説明する
-4. セルフケアは「副交感神経を高める行動」として提案する
+次のDATAだけを根拠に、上のルールに従って作成してください。
+出力は必ずタグ形式のみ（JSON禁止・コードブロック禁止・DATA貼り付け禁止）。
 
 DATA:
 ${JSON.stringify(input, null, 2)}
@@ -455,30 +464,28 @@ ${JSON.stringify(input, null, 2)}
         { role: 'user', content: user },
       ]);
 
-      const content1 = res1.choices[0]?.message?.content ?? '{}';
+      const content1 = res1.choices[0]?.message?.content ?? '';
 
-      let report = '';
-      let nextAction = '';
+      // 1) タグ抽出（最優先）
+      let report = extractTag(content1, 'report');
+      let nextAction = extractTag(content1, 'next_action');
 
-      try {
-        const parsed = JSON.parse(content1);
-        report = typeof parsed.report === 'string' ? parsed.report.trim() : '';
-        nextAction = typeof parsed.next_action === 'string' ? parsed.next_action.trim() : '';
-      } catch {
-        const jsonMatch = content1.match(/```json\n([\s\S]*?)\n```/) || content1.match(/\{[\s\S]*\}/);
-        const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content1;
-        try {
-          const parsed = JSON.parse(jsonStr);
-          report = typeof parsed.report === 'string' ? parsed.report.trim() : '';
-          nextAction = typeof parsed.next_action === 'string' ? parsed.next_action.trim() : '';
-        } catch {
-          report = content1;
-          nextAction = '';
+      // 2) タグが取れない場合だけJSON救済
+      if (!report || !nextAction) {
+        const parsed = tryParseJson(content1);
+        if (parsed) {
+          report = report || parsed.report;
+          nextAction = nextAction || parsed.next_action;
         }
       }
 
+      // 3) それでもreportが空なら「全文をreport扱い」になるが、混入を落とす
+      if (!report) report = content1.trim();
+      report = sanitizeReport(report);
+
       const needsReportRetry =
-        (!report || report.length < 220) ||
+        !report ||
+        report.length < 220 ||
         !reportHasRequiredHeadings(report) ||
         !reportHasNextVisitRange(report);
 
@@ -488,25 +495,33 @@ ${JSON.stringify(input, null, 2)}
         const strictSystem =
           system +
           `
-追加ルール：
-- reportは必ず見出し5つを含む
-- 【次回来店の目安】は必ず「3〜6週間後（約1ヶ月〜1ヶ月半）」にする
+追加ルール（再試行）：
+- 必ずタグ形式のみで出力（<report>と<next_action>以外は禁止）
+- reportは見出し5つを必ず含む
+- 【次回来店の目安】は必ず「3〜6週間後（約1ヶ月〜1ヶ月半）」
 - next_action は必ず40〜70文字、禁止語なし、時間/回数あり
 `;
+
         const res2 = await createCompletion([
           { role: 'system', content: strictSystem },
           { role: 'user', content: user },
         ]);
 
-        const content2 = res2.choices[0]?.message?.content ?? '{}';
-        try {
-          const parsed2 = JSON.parse(content2);
-          const r2 = typeof parsed2.report === 'string' ? parsed2.report.trim() : '';
-          const na2 = typeof parsed2.next_action === 'string' ? parsed2.next_action.trim() : '';
-          if (r2) report = r2;
-          if (na2) nextAction = na2;
-        } catch {
-          // noop
+        const content2 = res2.choices[0]?.message?.content ?? '';
+
+        const r2 = sanitizeReport(extractTag(content2, 'report'));
+        const na2 = extractTag(content2, 'next_action');
+
+        if (r2) report = r2;
+        if (na2) nextAction = na2;
+
+        // 再試行でもタグが取れない場合の最終救済
+        if ((!report || !nextAction) && content2) {
+          const parsed2 = tryParseJson(content2);
+          if (parsed2) {
+            report = report || sanitizeReport(parsed2.report);
+            nextAction = nextAction || parsed2.next_action;
+          }
         }
       }
 
