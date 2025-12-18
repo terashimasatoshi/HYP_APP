@@ -1,4 +1,3 @@
-
 // api/generate-report.ts
 import OpenAI from 'openai';
 import { supabaseAdmin } from './_supabase';
@@ -178,6 +177,10 @@ function reportHasRequiredHeadings(report: string): boolean {
     '【次回来店の目安】',
   ];
   return required.every((h) => report.includes(h));
+}
+
+function reportHasNextVisitRange(report: string): boolean {
+  return /3[〜~\-−–]6週間|約1[ヶか]月[〜~\-−–]1[ヶか]月半|1ヶ月〜1ヶ月半|3～6週間/.test(report);
 }
 
 async function createCompletion(messages: any[], opts?: { max_tokens?: number }) {
