@@ -6,8 +6,11 @@ import { HRV_KNOWLEDGE, SELFCARE_KNOWLEDGE, NEXT_ACTION_EXAMPLES, SELFCARE_EXAMP
 
 export const runtime = 'nodejs';
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const MODEL = process.env.OPENAI_REPORT_MODEL || 'gpt-4o-mini';
+const client = new OpenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/'
+});
+const MODEL = 'gemini-2.5-flash';
 
 /**
  * subjective_scores の phase(before/after) を取り込む対応版
